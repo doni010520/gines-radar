@@ -17,7 +17,7 @@ import { execFile } from "node:child_process";
 type Resposta = { status: number; corpo: string };
 
 function baixar(url: string, headers: Record<string, string>): Promise<Resposta> {
-  const args = ["-sS", "--compressed", "--max-time", "30", "-w", "\n%{http_code}"];
+  const args = ["-sSL", "--compressed", "--max-time", "30", "-w", "\n%{http_code}"];
   for (const [k, v] of Object.entries(headers)) args.push("-H", `${k}: ${v}`);
   args.push(url);
   return new Promise((resolve, reject) => {
