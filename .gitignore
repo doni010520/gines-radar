@@ -43,3 +43,6 @@ next-env.d.ts
 
 # brainstorming visual companion
 .superpowers/
+
+# credenciais do coletor local
+.env.coletor

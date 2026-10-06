@@ -9,6 +9,13 @@ const CONTROL =
   "placeholder:text-ink-subtle hover:border-border-strong focus:bg-surface focus:border-primary";
 const LABEL = "block text-xs font-semibold text-ink-muted";
 
+/** Coletor conta como online se bateu ponto nos últimos 3 min (ele bate a cada 1). */
+function statusColetor(vistoEm: string | null | undefined) {
+  if (!vistoEm) return { online: false, texto: "nunca conectou" };
+  const min = Math.round((Date.now() - new Date(vistoEm).getTime()) / 60_000);
+  return { online: min <= 3, texto: min <= 1 ? "agora" : `há ${min} min` };
+}
+
 export default async function ConfigPage() {
   const supabase = await createSupabaseServerClient();
   const [{ data: config }, { data: logs }] = await Promise.all([
@@ -19,6 +26,23 @@ export default async function ConfigPage() {
   return (
     <div className="space-y-5">
       <PageHeader title="Configuração" hint="Frequência da varredura e para onde vão os alertas." />
+      {(() => {
+        const st = statusColetor(config?.coletor_visto_em);
+        return (
+          <Card className={`p-4 text-sm ${st.online ? "" : "border-danger-edge"}`}>
+            <p className="font-semibold text-ink">
+              Coletor local: {st.online ? "🟢 online" : "🔴 offline"}{" "}
+              <span className="font-normal text-ink-muted">
+                ({config?.coletor_host ? `${config.coletor_host}, ` : ""}último sinal {st.texto})
+              </span>
+            </p>
+            <p className="mt-1 text-xs text-ink-subtle">
+              Os portais bloqueiam o servidor, então a leitura dos anúncios roda numa máquina com internet residencial.
+              Se ele estiver offline, nenhum anúncio novo é analisado.
+            </p>
+          </Card>
+        );
+      })()}
       <Card className="p-4">
         <form action={salvarConfig} className="space-y-4">
           <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-ink">

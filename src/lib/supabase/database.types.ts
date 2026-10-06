@@ -672,6 +672,8 @@ export type Database = {
         Row: {
           alerta_numero: string | null
           ativo: boolean
+          coletor_host: string | null
+          coletor_visto_em: string | null
           id: boolean
           intervalo_min: number
           updated_at: string
@@ -679,6 +681,8 @@ export type Database = {
         Insert: {
           alerta_numero?: string | null
           ativo?: boolean
+          coletor_host?: string | null
+          coletor_visto_em?: string | null
           id?: boolean
           intervalo_min?: number
           updated_at?: string
@@ -686,6 +690,8 @@ export type Database = {
         Update: {
           alerta_numero?: string | null
           ativo?: boolean
+          coletor_host?: string | null
+          coletor_visto_em?: string | null
           id?: boolean
           intervalo_min?: number
           updated_at?: string
