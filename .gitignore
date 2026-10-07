@@ -46,3 +46,6 @@ next-env.d.ts
 
 # credenciais do coletor local
 .env.coletor
+coletor.log
+coletor.err.log
+coletor.pid
