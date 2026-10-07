@@ -3,7 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 
 // Rotas que não passam pela autenticação do painel (webhook/cron/debug têm token próprio;
 // /auth/ é a entrada dos links de definir senha, que ainda não têm sessão)
-const PUBLIC_PREFIXES = ["/api/", "/auth/", "/login", "/_next", "/favicon"];
+const PUBLIC_PREFIXES = ["/api/", "/auth/", "/login", "/ver/", "/_next", "/favicon"];
 
 export async function proxy(request: NextRequest) {
   if (PUBLIC_PREFIXES.some((p) => request.nextUrl.pathname.startsWith(p))) {
