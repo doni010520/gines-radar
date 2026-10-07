@@ -82,7 +82,7 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
   const doTipo = novos.filter((a) => !a.tipo || b.tipos.includes(a.tipo));
 
   if (aprendendo) {
-    // só registra pra formar a média; nada vira alerta na 1ª passada
+    // registra pra formar a média; na 1ª passada nada vira alerta de WhatsApp
     if (doTipo.length) {
       await db.from("radar_anuncios").upsert(
         doTipo.map((a) => ({
@@ -93,9 +93,26 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
         { onConflict: "id", ignoreDuplicates: true }
       );
     }
+    // com a média formada, já marca as oportunidades por preço dessa 1ª leva (sem abrir cada
+    // anúncio — as palavras-chave valem a partir da 2ª busca, que lê a descrição dos novos)
+    const refInicial = await medias(db, b.id);
+    let oportunidadesIniciais = 0;
+    for (const a of doTipo) {
+      const m2 = precoM2(a);
+      const av = avaliar({
+        precoM2: m2,
+        tetoM2: b.teto_m2 ? Number(b.teto_m2) : null,
+        pctAbaixoMedia: Number(b.pct_abaixo_media),
+        mediaM2: refInicial[grupoDoTipo(a.tipo)],
+        palavras: [],
+      });
+      if (!av.oportunidade) continue;
+      oportunidadesIniciais++;
+      await db.from("radar_anuncios").update({ oportunidade: true, motivo: av.motivo, pct_abaixo: av.pctAbaixo }).eq("id", a.id);
+    }
     await db.from("radar_bairros").update({ aprendido_em: new Date().toISOString(), ultima_varredura: new Date().toISOString() }).eq("id", b.id);
-    await logEvent("info", "bairro aprendido", { bairro: b.nome, anuncios: doTipo.length });
-    return { novos: doTipo.length, oportunidades: 0 };
+    await logEvent("info", "bairro aprendido", { bairro: b.nome, anuncios: doTipo.length, oportunidades: oportunidadesIniciais });
+    return { novos: doTipo.length, oportunidades: oportunidadesIniciais };
   }
 
   // 2. analisa cada novo: R$/m² contra a referência + palavras na descrição
