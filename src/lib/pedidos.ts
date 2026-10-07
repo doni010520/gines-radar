@@ -15,11 +15,11 @@ export async function atenderPedidoPendente(executor: string): Promise<boolean> 
     .update({ busca_status: "rodando", busca_iniciada_em: new Date().toISOString() })
     .eq("id", true)
     .eq("busca_status", "aguardando")
-    .select("busca_bairro_id")
+    .select("busca_bairros")
     .maybeSingle();
   if (!data) return false;
 
-  await logEvent("info", "busca iniciada", { executor, bairro: data.busca_bairro_id ?? "todos" });
-  await rodarVarredura({ bairroId: data.busca_bairro_id });
+  await logEvent("info", "busca iniciada", { executor, bairros: data.busca_bairros ?? "todos" });
+  await rodarVarredura({ bairroIds: data.busca_bairros });
   return true;
 }

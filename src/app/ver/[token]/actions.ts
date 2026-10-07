@@ -78,9 +78,11 @@ export async function descartar(token: string, id: string) {
   revalidatePath(`/ver/${token}`);
 }
 
-/** Botão "Buscar agora": registra o pedido; quem executa é o coletor local (ou o servidor com proxy). */
-export async function pedirBusca(token: string, bairroId: string | null) {
+/** Botão "Buscar": grava o pedido com os bairros marcados; quem executa é o coletor local (ou o servidor com proxy). */
+export async function pedirBusca(token: string, formData: FormData) {
   const db = validar(token);
+  const bairros = formData.getAll("bairros").map(String).filter(Boolean);
+  if (bairros.length === 0) throw new Error("Marque pelo menos um bairro");
   const { data: cfg } = await db.from("radar_config").select("busca_status").eq("id", true).maybeSingle();
   if (cfg?.busca_status === "rodando" || cfg?.busca_status === "aguardando") return;
   await db
@@ -88,7 +90,7 @@ export async function pedirBusca(token: string, bairroId: string | null) {
     .update({
       busca_status: "aguardando",
       busca_solicitada_em: new Date().toISOString(),
-      busca_bairro_id: bairroId,
+      busca_bairros: bairros,
       busca_resultado: null,
     })
     .eq("id", true);

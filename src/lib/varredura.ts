@@ -141,11 +141,11 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
 let rodando = false;
 
 /**
- * Uma busca: os bairros ativos (ou só um, se bairroId vier). Sob demanda — só roda quando
+ * Uma busca: os bairros escolhidos (ou todos os ativos, se a lista vier vazia). Sob demanda — só roda quando
  * alguém aperta "Buscar agora". Status e resultado ficam em radar_config pra tela acompanhar.
  */
 export async function rodarVarredura(
-  opts: { bairroId?: string | null } = {}
+  opts: { bairroIds?: string[] | null } = {}
 ): Promise<{ bairros: number; novos: number; oportunidades: number } | null> {
   if (rodando) return null;
   rodando = true;
@@ -156,7 +156,7 @@ export async function rodarVarredura(
     .eq("id", true);
   try {
     let q = db.from("radar_bairros").select("*").eq("ativo", true);
-    if (opts.bairroId) q = q.eq("id", opts.bairroId);
+    if (opts.bairroIds?.length) q = q.in("id", opts.bairroIds);
     const [{ data: config }, { data: bairros }, { data: palavras }] = await Promise.all([
       db.from("radar_config").select("*").eq("id", true).maybeSingle(),
       q,

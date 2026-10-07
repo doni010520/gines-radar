@@ -673,6 +673,7 @@ export type Database = {
           alerta_numero: string | null
           ativo: boolean
           busca_bairro_id: string | null
+          busca_bairros: string[] | null
           busca_iniciada_em: string | null
           busca_resultado: Json | null
           busca_solicitada_em: string | null
@@ -687,6 +688,7 @@ export type Database = {
           alerta_numero?: string | null
           ativo?: boolean
           busca_bairro_id?: string | null
+          busca_bairros?: string[] | null
           busca_iniciada_em?: string | null
           busca_resultado?: Json | null
           busca_solicitada_em?: string | null
@@ -701,6 +703,7 @@ export type Database = {
           alerta_numero?: string | null
           ativo?: boolean
           busca_bairro_id?: string | null
+          busca_bairros?: string[] | null
           busca_iniciada_em?: string | null
           busca_resultado?: Json | null
           busca_solicitada_em?: string | null
