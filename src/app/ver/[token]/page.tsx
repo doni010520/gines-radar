@@ -189,14 +189,14 @@ export default async function VerPage({
                 .
               </p>
             ) : (
-              <form action={pedirBusca.bind(null, token)} className="space-y-3">
-                <SelecaoBairros bairros={ativos.map((b) => ({ id: b.id, nome: b.nome }))} />
-                <div className="flex flex-wrap items-center gap-3">
+              <form action={pedirBusca.bind(null, token)} className="space-y-2">
+                <div className="flex flex-wrap items-start gap-2">
+                  <SelecaoBairros bairros={ativos.map((b) => ({ id: b.id, nome: b.nome, zona: b.zona }))} />
                   <FormSubmitButton pendingLabel="Enviando…">{emAndamento ? "Buscando…" : "🔎 Buscar"}</FormSubmitButton>
-                  <Link href={`${base}?aba=criterios`} className="text-xs text-primary hover:underline">
-                    ver/editar critérios de cada bairro
-                  </Link>
                 </div>
+                <Link href={`${base}?aba=criterios`} className="text-xs text-primary hover:underline">
+                  critérios de preço e tipo de cada bairro
+                </Link>
               </form>
             )}
             {textoStatus && <p className={`text-sm ${status === "erro" ? "text-danger-ink" : "text-ink-muted"}`}>{textoStatus}</p>}
