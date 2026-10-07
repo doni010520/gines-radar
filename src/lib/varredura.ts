@@ -17,8 +17,14 @@ const PAUSA_MS = 1500;
 
 const dorme = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Preço por m², ou null quando o anúncio tem preço/área simbólicos ("R$ 1", "sob consulta",
+ * área 1 m²) — esses viravam "100% abaixo da média" e poluíam a lista.
+ */
 function precoM2(a: AnuncioZap): number | null {
-  return a.preco && a.area ? Math.round(a.preco / a.area) : null;
+  if (!a.preco || !a.area || a.preco < 30_000 || a.area < 10) return null;
+  const m2 = Math.round(a.preco / a.area);
+  return m2 >= 500 ? m2 : null;
 }
 
 const fmt = (n: number) => n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });

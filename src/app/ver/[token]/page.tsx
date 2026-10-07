@@ -122,12 +122,11 @@ export default async function VerPage({
     .limit(200);
   if (filtroBairro) qLista = qLista.eq("bairro_id", filtroBairro);
 
-  const [{ data: cfg }, { data: bairros }, { data: palavras }, { data: lista }, { count: analisados }] = await Promise.all([
+  const [{ data: cfg }, { data: bairros }, { data: palavras }, { data: lista }] = await Promise.all([
     db.from("radar_config").select("*").eq("id", true).maybeSingle(),
     db.from("radar_bairros").select("*").order("nome"),
     db.from("radar_palavras").select("*").order("termo"),
     qLista,
-    db.from("radar_anuncios").select("id", { count: "exact", head: true }),
   ]);
   const nome = new Map((bairros ?? []).map((b) => [b.id, b.nome]));
   const ativos = (bairros ?? []).filter((b) => b.ativo);
@@ -145,7 +144,7 @@ export default async function VerPage({
       : status === "rodando"
         ? "Buscando… a lista atualiza sozinha."
         : status === "concluida"
-          ? `Última busca: ${resultado?.novos ?? 0} anúncios novos, ${resultado?.oportunidades ?? 0} oportunidades novas.`
+          ? `Última busca (${dataHora(cfg?.busca_iniciada_em)}): ${resultado?.novos ?? 0} anúncios novos analisados, ${resultado?.oportunidades ?? 0} oportunidades novas.`
           : status === "erro"
             ? `A última busca falhou: ${resultado?.erros?.[0] ?? resultado?.erro ?? "erro desconhecido"}`
             : "";
@@ -154,21 +153,19 @@ export default async function VerPage({
   const abaLink = (a: Aba, rotulo: string) => (
     <Link
       href={a === "oportunidades" ? base : `${base}?aba=${a}`}
-      className={`border-b-2 px-1 pb-2 text-sm font-semibold transition-colors ${aba === a ? "border-primary text-primary" : "border-transparent text-ink-muted hover:text-ink"}`}
+      className={`border-b-2 px-1 pb-2 text-sm font-semibold outline-none transition-colors focus-visible:text-primary ${aba === a ? "border-primary text-primary" : "border-transparent text-ink-muted hover:text-ink"}`}
     >
       {rotulo}
     </Link>
   );
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 px-4 py-6">
+    <div className="mx-auto w-full max-w-4xl space-y-5 px-4 py-6">
       <AtualizaSozinho ativo={emAndamento} />
       <header className="space-y-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-ink">GINES · Radar de oportunidades</h1>
-          <p className="text-xs text-ink-subtle">
-            {analisados ?? 0} anúncios analisados no ZAP · coletor {coletorOnline ? "🟢 online" : "🔴 offline"}
-          </p>
+          <p className="text-xs text-ink-subtle">Busca no ZAP · coletor {coletorOnline ? "🟢 online" : "🔴 offline"}</p>
         </div>
         <nav className="flex gap-6 border-b border-border">
           {abaLink("oportunidades", "Oportunidades")}
