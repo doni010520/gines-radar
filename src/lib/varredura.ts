@@ -140,22 +140,33 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
 
 let rodando = false;
 
-/** Uma rodada completa: todos os bairros ativos. Nunca roda duas ao mesmo tempo. */
-export async function rodarVarredura(): Promise<{ bairros: number; novos: number; oportunidades: number } | null> {
+/**
+ * Uma busca: os bairros ativos (ou só um, se bairroId vier). Sob demanda — só roda quando
+ * alguém aperta "Buscar agora". Status e resultado ficam em radar_config pra tela acompanhar.
+ */
+export async function rodarVarredura(
+  opts: { bairroId?: string | null } = {}
+): Promise<{ bairros: number; novos: number; oportunidades: number } | null> {
   if (rodando) return null;
   rodando = true;
   const db = createServiceClient();
+  await db
+    .from("radar_config")
+    .update({ busca_status: "rodando", busca_iniciada_em: new Date().toISOString() })
+    .eq("id", true);
   try {
+    let q = db.from("radar_bairros").select("*").eq("ativo", true);
+    if (opts.bairroId) q = q.eq("id", opts.bairroId);
     const [{ data: config }, { data: bairros }, { data: palavras }] = await Promise.all([
       db.from("radar_config").select("*").eq("id", true).maybeSingle(),
-      db.from("radar_bairros").select("*").eq("ativo", true),
+      q,
       db.from("radar_palavras").select("termo").eq("ativo", true),
     ]);
-    if (config && !config.ativo) return { bairros: 0, novos: 0, oportunidades: 0 };
 
     const termos = (palavras ?? []).map((p) => p.termo);
     const alertaNumero = config?.alerta_numero?.trim() || process.env.RADAR_ALERTA_NUMERO?.trim() || null;
     const total = { bairros: 0, novos: 0, oportunidades: 0 };
+    const erros: string[] = [];
     for (const b of bairros ?? []) {
       try {
         const r = await varrerBairro(db, b, termos, alertaNumero);
@@ -163,11 +174,19 @@ export async function rodarVarredura(): Promise<{ bairros: number; novos: number
         total.novos += r.novos;
         total.oportunidades += r.oportunidades;
       } catch (err) {
-        await logEvent("error", "falha na varredura do bairro", { bairro: b.nome, error: String(err) });
+        erros.push(`${b.nome}: ${String(err).slice(0, 160)}`);
+        await logEvent("error", "falha na busca do bairro", { bairro: b.nome, error: String(err) });
       }
     }
-    if (total.novos) await logEvent("info", "varredura concluída", total);
+    await logEvent("info", "busca concluída", { ...total, erros: erros.length });
+    await db
+      .from("radar_config")
+      .update({ busca_status: erros.length && !total.bairros ? "erro" : "concluida", busca_resultado: { ...total, erros } })
+      .eq("id", true);
     return total;
+  } catch (err) {
+    await db.from("radar_config").update({ busca_status: "erro", busca_resultado: { erro: String(err) } }).eq("id", true);
+    throw err;
   } finally {
     rodando = false;
   }

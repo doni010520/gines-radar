@@ -18,6 +18,8 @@ type Resposta = { status: number; corpo: string };
 
 function baixar(url: string, headers: Record<string, string>): Promise<Resposta> {
   const args = ["-sSL", "--compressed", "--max-time", "30", "-w", "\n%{http_code}"];
+  // saída residencial (ex.: socks5h://liriel_tailscale:1055): o IP do servidor é bloqueado
+  if (process.env.RADAR_PROXY) args.push("--proxy", process.env.RADAR_PROXY);
   for (const [k, v] of Object.entries(headers)) args.push("-H", `${k}: ${v}`);
   args.push(url);
   return new Promise((resolve, reject) => {

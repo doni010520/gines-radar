@@ -672,6 +672,11 @@ export type Database = {
         Row: {
           alerta_numero: string | null
           ativo: boolean
+          busca_bairro_id: string | null
+          busca_iniciada_em: string | null
+          busca_resultado: Json | null
+          busca_solicitada_em: string | null
+          busca_status: string
           coletor_host: string | null
           coletor_visto_em: string | null
           id: boolean
@@ -681,6 +686,11 @@ export type Database = {
         Insert: {
           alerta_numero?: string | null
           ativo?: boolean
+          busca_bairro_id?: string | null
+          busca_iniciada_em?: string | null
+          busca_resultado?: Json | null
+          busca_solicitada_em?: string | null
+          busca_status?: string
           coletor_host?: string | null
           coletor_visto_em?: string | null
           id?: boolean
@@ -690,6 +700,11 @@ export type Database = {
         Update: {
           alerta_numero?: string | null
           ativo?: boolean
+          busca_bairro_id?: string | null
+          busca_iniciada_em?: string | null
+          busca_resultado?: Json | null
+          busca_solicitada_em?: string | null
+          busca_status?: string
           coletor_host?: string | null
           coletor_visto_em?: string | null
           id?: boolean
