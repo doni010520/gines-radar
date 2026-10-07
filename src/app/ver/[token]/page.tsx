@@ -169,7 +169,7 @@ export default async function VerPage({
         </div>
         <nav className="flex gap-6 border-b border-border">
           {abaLink("oportunidades", "Oportunidades")}
-          {abaLink("criterios", `Critérios (${ativos.length} bairros)`)}
+          {abaLink("criterios", "Critérios")}
           {abaLink("alertas", "Alertas")}
         </nav>
       </header>
