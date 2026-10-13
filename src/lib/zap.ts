@@ -16,10 +16,18 @@ import { execFile } from "node:child_process";
 
 type Resposta = { status: number; corpo: string };
 
+/**
+ * Saída residencial (Webshare): o IP do servidor é bloqueado pelos portais.
+ * p.webshare.io é um geo-DNS com dezenas de IPs e o DNS do container não resolve (13/10/26) —
+ * com proxy, o curl resolve nomes por DNS-over-HTTPS.
+ */
+export function argsProxy(): string[] {
+  const proxy = process.env.RADAR_PROXY;
+  return proxy ? ["--proxy", proxy, "--doh-url", "https://cloudflare-dns.com/dns-query"] : [];
+}
+
 function baixar(url: string, headers: Record<string, string>): Promise<Resposta> {
-  const args = ["-sSL", "--compressed", "--max-time", "30", "-w", "\n%{http_code}"];
-  // saída residencial (ex.: socks5h://liriel_tailscale:1055): o IP do servidor é bloqueado
-  if (process.env.RADAR_PROXY) args.push("--proxy", process.env.RADAR_PROXY);
+  const args = ["-sSL", "--compressed", "--max-time", "30", "-w", "\n%{http_code}", ...argsProxy()];
   for (const [k, v] of Object.entries(headers)) args.push("-H", `${k}: ${v}`);
   args.push(url);
   return new Promise((resolve, reject) => {
