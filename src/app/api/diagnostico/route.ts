@@ -109,6 +109,8 @@ export async function GET(req: NextRequest) {
   if (!process.env.RADAR_TOKEN || token !== process.env.RADAR_TOKEN) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
+  const anuncio = req.nextUrl.searchParams.get("anuncio");
+  if (anuncio) return NextResponse.json(await testarAnuncio(anuncio));
   const out: Record<string, unknown> = {};
   for (const [nome, url] of Object.entries(ALVOS)) {
     out[`${nome}_curl`] = await viaCurl(url);
