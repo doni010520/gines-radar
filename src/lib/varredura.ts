@@ -1,7 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Database } from "@/lib/supabase/database.types";
 import { buscarDescricao, buscarPagina, type AnuncioZap } from "./zap";
-import { AMOSTRA_MINIMA, avaliar, grupoDoTipo, mediana, palavrasEncontradas } from "./analise";
+import { AMOSTRA_MINIMA, GRUPOS, avaliar, grupoDoTipo, mediana, palavrasEncontradas, type Grupo } from "./analise";
 import { enviarWhatsApp } from "./whatsapp";
 import { logEvent } from "./log";
 
@@ -29,8 +29,12 @@ function precoM2(a: AnuncioZap): number | null {
 
 const fmt = (n: number) => n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 
-/** Média (mediana) de R$/m² do bairro por grupo, com os anúncios vistos nos últimos 180 dias. */
-async function medias(db: Db, bairroId: string): Promise<Record<"terreno" | "construido", number | null>> {
+/**
+ * Média (mediana) de R$/m² do bairro por grupo, com os anúncios vistos nos últimos 180 dias.
+ * Grupo com menos de AMOSTRA_MINIMA anúncios fica sem referência (só palavras-chave valem) —
+ * completar com outro grupo distorceria a comparação.
+ */
+async function medias(db: Db, bairroId: string): Promise<Record<Grupo, number | null>> {
   const desde = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString();
   const { data } = await db
     .from("radar_anuncios")
@@ -39,11 +43,29 @@ async function medias(db: Db, bairroId: string): Promise<Record<"terreno" | "con
     .gte("visto_em", desde)
     .not("preco_m2", "is", null)
     .limit(5000);
-  const grupos = { terreno: [] as number[], construido: [] as number[] };
+  const grupos: Record<Grupo, number[]> = { terreno: [], casa: [], apartamento: [] };
   for (const r of data ?? []) grupos[grupoDoTipo(r.tipo)].push(Number(r.preco_m2));
-  const todos = [...grupos.terreno, ...grupos.construido];
-  const ou = (g: number[]) => (g.length >= AMOSTRA_MINIMA ? mediana(g) : todos.length >= AMOSTRA_MINIMA ? mediana(todos) : null);
-  return { terreno: ou(grupos.terreno), construido: ou(grupos.construido) };
+  return Object.fromEntries(
+    GRUPOS.map((g) => [g, grupos[g].length >= AMOSTRA_MINIMA ? mediana(grupos[g]) : null])
+  ) as Record<Grupo, number | null>;
+}
+
+/**
+ * O mesmo imóvel costuma estar anunciado por várias imobiliárias (ids diferentes, mesmo preço e
+ * mesma área). Devolve o id da oportunidade que já representa esse imóvel no bairro, se houver.
+ */
+async function mesmaOportunidade(db: Db, bairroId: string, a: AnuncioZap): Promise<string | null> {
+  if (!a.preco || !a.area) return null;
+  const { data } = await db
+    .from("radar_anuncios")
+    .select("id")
+    .eq("bairro_id", bairroId)
+    .eq("oportunidade", true)
+    .eq("preco", a.preco)
+    .eq("area", a.area)
+    .neq("id", a.id)
+    .limit(1);
+  return data?.[0]?.id ?? null;
 }
 
 function textoAlerta(b: Bairro, a: AnuncioZap, m2: number | null, pct: number | null, ref: number | null, palavras: string[]) {
@@ -107,6 +129,7 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
         palavras: [],
       });
       if (!av.oportunidade) continue;
+      if (await mesmaOportunidade(db, b.id, a)) continue;
       oportunidadesIniciais++;
       await db.from("radar_anuncios").update({ oportunidade: true, motivo: av.motivo, pct_abaixo: av.pctAbaixo }).eq("id", a.id);
     }
@@ -136,6 +159,11 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
       mediaM2: ref[grupoDoTipo(a.tipo)],
       palavras,
     });
+    const repetido = av.oportunidade ? await mesmaOportunidade(db, b.id, a) : null;
+    if (repetido) {
+      av.oportunidade = false;
+      av.motivo = `mesmo imóvel de ${repetido} (outra imobiliária)`;
+    }
 
     const { error } = await db.from("radar_anuncios").insert({
       id: a.id, portal: "zap", bairro_id: b.id, tipo: a.tipo, titulo: a.titulo, url: a.url,

@@ -21,9 +21,18 @@ export function palavrasEncontradas(texto: string, termos: string[]): string[] {
   return termos.filter((termo) => t.includes(normalizar(termo)));
 }
 
-/** Terreno e construído têm m² de natureza diferente: a média é calculada separada. */
-export function grupoDoTipo(tipo: string | null): "terreno" | "construido" {
-  return tipo && /ALLOTMENT|LAND/i.test(tipo) ? "terreno" : "construido";
+export type Grupo = "terreno" | "casa" | "apartamento";
+export const GRUPOS: Grupo[] = ["terreno", "casa", "apartamento"];
+
+/**
+ * Cada grupo tem m² de natureza diferente e a média é calculada separada. Casa e apartamento
+ * não se misturam: na Vila Madalena a casa sai ~R$ 10 mil/m² e o apartamento ~R$ 16 mil/m² —
+ * misturados, toda casa parecia "50% abaixo" (corrigido em 13/10/26).
+ */
+export function grupoDoTipo(tipo: string | null): Grupo {
+  if (tipo && /ALLOTMENT|LAND/i.test(tipo)) return "terreno";
+  if (tipo && /HOME|HOUSE|CONDOMINIUM|VILLAGE/i.test(tipo)) return "casa";
+  return "apartamento";
 }
 
 export function mediana(valores: number[]): number | null {
