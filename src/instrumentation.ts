@@ -11,12 +11,21 @@ export async function register() {
   const { atenderPedidoPendente } = await import("@/lib/pedidos");
   const { logEvent } = await import("@/lib/log");
 
+  const { createServiceClient } = await import("@/lib/supabase/service");
+  const db = createServiceClient();
+
   let ocupado = false;
+  let ultimoSinal = 0;
   setInterval(async () => {
     if (ocupado) return;
     ocupado = true;
     try {
-      await atenderPedidoPendente("servidor (proxy)");
+      // sinal de vida: a tela mostra "online" e sabe que tem quem execute o botão Buscar
+      if (Date.now() - ultimoSinal > 60_000) {
+        ultimoSinal = Date.now();
+        await db.from("radar_config").update({ coletor_visto_em: new Date().toISOString(), coletor_host: "servidor (proxy)" }).eq("id", true);
+      }
+      if (await atenderPedidoPendente("servidor (proxy)")) ultimoSinal = 0;
     } catch (err) {
       await logEvent("error", "falha ao atender pedido de busca", { error: String(err) });
     } finally {
