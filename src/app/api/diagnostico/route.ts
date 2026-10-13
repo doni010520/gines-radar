@@ -66,6 +66,44 @@ async function viaFlare(url: string): Promise<unknown> {
   }
 }
 
+const NAVEGADOR = [
+  "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language: pt-BR,pt;q=0.9,en;q=0.8",
+  "Upgrade-Insecure-Requests: 1",
+  "Sec-Fetch-Dest: document",
+  "Sec-Fetch-Mode: navigate",
+  "Sec-Fetch-Site: none",
+  "Sec-Fetch-User: ?1",
+  'sec-ch-ua: "Chromium";v="129", "Not=A?Brand";v="8"',
+  "sec-ch-ua-mobile: ?0",
+  'sec-ch-ua-platform: "Windows"',
+];
+
+/** Página de anúncio com variações de requisição — acha qual passa pela Cloudflare. */
+function variante(url: string, extra: string[]): Promise<unknown> {
+  const args = ["-sS", "--compressed", "--max-time", "30", "-o", "/dev/null", "-w", "%{http_code} %{http_version}", "-H", `User-Agent: ${UA}`, ...extra, ...argsProxy(), url];
+  return new Promise((resolve) => {
+    execFile("curl", args, (err, stdout) => resolve(err ? `erro: ${err.message.slice(-120)}` : stdout));
+  });
+}
+
+async function testarAnuncio(url: string) {
+  const nav = NAVEGADOR.flatMap((h) => ["-H", h]);
+  const variantes: Record<string, string[]> = {
+    atual: ["-H", "Accept-Language: pt-BR,pt;q=0.9"],
+    http11: ["--http1.1", "-H", "Accept-Language: pt-BR,pt;q=0.9"],
+    navegador: nav,
+    navegador_http11: ["--http1.1", ...nav],
+  };
+  const out: Record<string, unknown[]> = {};
+  for (const [nome, extra] of Object.entries(variantes)) {
+    out[nome] = [];
+    for (let i = 0; i < 3; i++) out[nome].push(await variante(url, extra));
+  }
+  const versao = await new Promise((r) => execFile("curl", ["-V"], (_e, so) => r(String(so).split("\n")[0])));
+  return { versao, ...out };
+}
+
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token") ?? req.headers.get("x-radar-token");
   if (!process.env.RADAR_TOKEN || token !== process.env.RADAR_TOKEN) {
