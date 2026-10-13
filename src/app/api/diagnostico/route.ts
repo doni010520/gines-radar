@@ -37,6 +37,7 @@ function resumo(corpo: string) {
 function viaCurl(url: string): Promise<unknown> {
   const args = ["-sS", "--compressed", "--max-time", "30", "-w", "\n%{http_code}", "-H", `User-Agent: ${UA}`, "-H", "Accept-Language: pt-BR"];
   if (url.includes("glue-api")) args.push("-H", "x-domain: .zapimoveis.com.br", "-H", "Origin: https://www.zapimoveis.com.br");
+  if (process.env.RADAR_PROXY) args.push("--proxy", process.env.RADAR_PROXY);
   args.push(url);
   return new Promise((resolve) => {
     execFile("curl", args, { maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
