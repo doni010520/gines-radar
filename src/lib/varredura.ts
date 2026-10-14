@@ -3,6 +3,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { buscarDescricao, buscarPagina, type AnuncioZap } from "./zap";
 import { AMOSTRA_MINIMA, GRUPOS, avaliar, grupoDoTipo, mediana, palavrasEncontradas, type Grupo } from "./analise";
 import { enviarWhatsApp } from "./whatsapp";
+import { imoveisCaixaDoBairro } from "./caixa";
 import { logEvent } from "./log";
 
 type Db = ReturnType<typeof createServiceClient>;
@@ -41,6 +42,7 @@ async function medias(db: Db, bairroId: string): Promise<Record<Grupo, number | 
     .select("tipo,preco_m2")
     .eq("bairro_id", bairroId)
     .gte("visto_em", desde)
+    .neq("portal", "caixa") // imóvel retomado de banco puxaria a média do mercado pra baixo
     .not("preco_m2", "is", null)
     .limit(5000);
   const grupos: Record<Grupo, number[]> = { terreno: [], casa: [], apartamento: [] };
@@ -191,6 +193,63 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
   return { novos: doTipo.length, oportunidades };
 }
 
+/**
+ * Caixa: a planilha do estado vem inteira a cada busca; grava só o que ainda não conhece.
+ * Oportunidade = desconto sobre a avaliação da própria Caixa ≥ corte do bairro, ou R$/m² dentro
+ * do critério do bairro (média do ZAP / teto).
+ */
+async function varrerCaixa(db: Db, b: Bairro, alertaNumero: string | null) {
+  const imoveis = (await imoveisCaixaDoBairro(b)).filter((i) => !i.tipo || b.tipos.includes(i.tipo));
+  if (imoveis.length === 0) return { novos: 0, oportunidades: 0 };
+  const { data: conhecidos } = await db.from("radar_anuncios").select("id").in("id", imoveis.map((i) => i.id));
+  const jaVistos = new Set((conhecidos ?? []).map((c) => c.id));
+  const novos = imoveis.filter((i) => !jaVistos.has(i.id));
+  const ref = await medias(db, b.id);
+  const corte = Number(b.pct_abaixo_media);
+  let oportunidades = 0;
+
+  for (const i of novos) {
+    const m2 = i.preco && i.area && i.area >= 10 ? Math.round(i.preco / i.area) : null;
+    const av = avaliar({
+      precoM2: m2,
+      tetoM2: b.teto_m2 ? Number(b.teto_m2) : null,
+      pctAbaixoMedia: corte,
+      mediaM2: ref[grupoDoTipo(i.tipo)],
+      palavras: [],
+    });
+    const pelaAvaliacao = i.desconto !== null && i.desconto >= corte;
+    const motivos = [pelaAvaliacao ? `Caixa: ${i.desconto}% abaixo da avaliação (R$ ${fmt(i.avaliacao ?? 0)})` : "", av.motivo]
+      .filter(Boolean)
+      .join(" · ");
+    const oportunidade = pelaAvaliacao || av.oportunidade;
+
+    const { error } = await db.from("radar_anuncios").insert({
+      id: i.id, portal: "caixa", bairro_id: b.id, tipo: i.tipo, titulo: i.titulo, url: i.url,
+      preco: i.preco, area: i.area, preco_m2: m2, descricao: i.descricao, palavras: [],
+      anunciante: `Caixa · ${i.modalidade}`, oportunidade, motivo: motivos || null,
+      pct_abaixo: pelaAvaliacao ? i.desconto : av.pctAbaixo,
+    });
+    if (error || !oportunidade) continue;
+    oportunidades++;
+    if (alertaNumero) {
+      try {
+        const texto = [
+          `🏦 *Oportunidade Caixa — ${b.nome}*`,
+          i.titulo,
+          i.preco ? `💰 R$ ${fmt(i.preco)}${i.avaliacao ? ` (avaliado em R$ ${fmt(i.avaliacao)})` : ""}` : "",
+          motivos ? `📉 ${motivos}` : "",
+          i.url,
+        ].filter(Boolean).join("\n");
+        await enviarWhatsApp(alertaNumero, texto);
+        await db.from("radar_anuncios").update({ alertado_em: new Date().toISOString() }).eq("id", i.id);
+      } catch (err) {
+        await logEvent("error", "falha ao enviar alerta", { id: i.id, error: String(err) });
+      }
+    }
+  }
+  return { novos: novos.length, oportunidades };
+}
+
 let rodando = false;
 
 /**
@@ -223,6 +282,15 @@ export async function rodarVarredura(
     for (const b of bairros ?? []) {
       try {
         const r = await varrerBairro(db, b, termos, alertaNumero);
+        // Caixa falhar não derruba a busca do bairro no ZAP
+        try {
+          const c = await varrerCaixa(db, b, alertaNumero);
+          r.novos += c.novos;
+          r.oportunidades += c.oportunidades;
+        } catch (err) {
+          erros.push(`${b.nome} (Caixa): ${String(err).slice(0, 120)}`);
+          await logEvent("error", "falha na busca da Caixa", { bairro: b.nome, error: String(err) });
+        }
         total.bairros++;
         total.novos += r.novos;
         total.oportunidades += r.oportunidades;

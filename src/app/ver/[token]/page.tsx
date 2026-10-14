@@ -157,7 +157,7 @@ export default async function VerPage({
   const soUltimaBusca = !verTodas && !filtroBairro && bairrosDaBusca.length > 0;
   let qLista = db
     .from("radar_anuncios")
-    .select("id,bairro_id,tipo,titulo,url,preco,area,preco_m2,pct_abaixo,motivo,anunciante,visto_em")
+    .select("id,portal,bairro_id,tipo,titulo,url,preco,area,preco_m2,pct_abaixo,motivo,anunciante,visto_em")
     .eq("oportunidade", true)
     .eq("descartado", false)
     .order("pct_abaixo", { ascending: false, nullsFirst: false })
@@ -206,7 +206,7 @@ export default async function VerPage({
       <header className="space-y-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-ink">GINES · Radar de oportunidades</h1>
-          <p className="text-xs text-ink-subtle">Busca no ZAP · coletor {coletorOnline ? "🟢 online" : "🔴 offline"}</p>
+          <p className="text-xs text-ink-subtle">Busca no ZAP e nos imóveis da Caixa · coletor {coletorOnline ? "🟢 online" : "🔴 offline"}</p>
         </div>
         <nav className="flex gap-6 border-b border-border">
           {abaLink("oportunidades", "Oportunidades")}
@@ -287,9 +287,10 @@ export default async function VerPage({
                   <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       {ehNovo(a.visto_em) && <Badge tone="warn">NOVO</Badge>}
+                      <Badge tone="mute">{a.portal === "caixa" ? "🏦 Caixa" : "ZAP"}</Badge>
                       <Badge tone="info">{a.bairro_id ? nome.get(a.bairro_id) ?? "—" : "—"}</Badge>
                       {a.tipo && <Badge tone="mute">{ROTULO_TIPO[a.tipo] ?? a.tipo}</Badge>}
-                      {a.pct_abaixo !== null && Number(a.pct_abaixo) > 0 && <Badge tone="ok">{Number(a.pct_abaixo)}% abaixo da média</Badge>}
+                      {a.pct_abaixo !== null && Number(a.pct_abaixo) > 0 && <Badge tone="ok">{Number(a.pct_abaixo)}% abaixo {a.motivo?.startsWith("Caixa:") ? "da avaliação" : "da média"}</Badge>}
                     </div>
                     <a href={a.url ?? "#"} target="_blank" rel="noreferrer" className="block font-semibold text-ink hover:text-primary">
                       {a.titulo || "Anúncio sem título"}
