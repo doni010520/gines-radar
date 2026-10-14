@@ -34,7 +34,10 @@ async function main() {
     );
     console.log(`\n${b.nome}: medianas`, ref, "amostras", Object.fromEntries(GRUPOS.map((g) => [g, grupos[g].length])));
 
-    const vistos = new Map<string, string>(); // "preço|área" → id da oportunidade
+    // oportunidades já aceitas: mesma área e preço até 1% diferente = mesmo imóvel
+    const aceitas: { id: string; preco: number; area: number }[] = [];
+    const repetida = (preco: number | null, area: number | null) =>
+      preco && area ? aceitas.find((x) => x.area === area && Math.abs(x.preco - preco) <= preco * 0.01) : undefined;
     let n = 0;
     // do maior deságio pro menor: o representante de um imóvel repetido é o primeiro visto
     const ordenados = [...lista].sort((x, y) => Number(x.preco_m2 ?? 1e9) - Number(y.preco_m2 ?? 1e9));
@@ -65,14 +68,14 @@ async function main() {
         mediaM2: ref[grupoDoTipo(a.tipo)],
         palavras: palavrasAchadas,
       });
-      const chave = `${a.preco}|${a.area}`;
       let motivo = av.motivo || null;
       let oportunidade = av.oportunidade;
-      if (oportunidade && a.preco && a.area && vistos.has(chave)) {
+      const igual = oportunidade ? repetida(Number(a.preco), Number(a.area)) : undefined;
+      if (igual) {
         oportunidade = false;
-        motivo = `mesmo imóvel de ${vistos.get(chave)} (outra imobiliária)`;
+        motivo = `mesmo imóvel de ${igual.id} (outra imobiliária)`;
       } else if (oportunidade) {
-        vistos.set(chave, a.id);
+        aceitas.push({ id: a.id, preco: Number(a.preco), area: Number(a.area) });
         n++;
       }
       await db

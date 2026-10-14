@@ -8,6 +8,7 @@ import { dataHora, preco } from "@/lib/ui/format";
 import { FormSubmitButton } from "../../(admin)/FormSubmitButton";
 import { Acao, AtualizaSozinho } from "./Controles";
 import { SelecaoBairros } from "./SelecaoBairros";
+import { ESTADOS, siglaUf } from "@/lib/estados";
 import {
   adicionarPalavra,
   alternarBairro,
@@ -43,7 +44,16 @@ const ROTULO_TIPO: Record<string, string> = Object.fromEntries(TIPOS);
 const PADRAO = ["HOME", "TWO_STORY_HOUSE", "CONDOMINIUM", "RESIDENTIAL_ALLOTMENT_LAND", "APARTMENT"];
 
 type Aba = "oportunidades" | "criterios" | "alertas";
-type BairroForm = { id: string; nome: string; zona: string; teto_m2: number | null; pct_abaixo_media: number; tipos: string[] };
+type BairroForm = {
+  id: string;
+  nome: string;
+  zona: string;
+  cidade: string;
+  estado: string;
+  teto_m2: number | null;
+  pct_abaixo_media: number;
+  tipos: string[];
+};
 
 function minutosDesde(iso: string | null | undefined) {
   if (!iso) return null;
@@ -58,19 +68,33 @@ function CamposBairro({ b }: { b?: BairroForm }) {
   return (
     <>
       {b && <input type="hidden" name="id" value={b.id} />}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
           <label htmlFor={`${p}-nome`} className={LABEL}>
-            Bairro (como no ZAP)
+            Bairro (como aparece no portal)
           </label>
           <input id={`${p}-nome`} name="nome" required defaultValue={b?.nome} placeholder="Pinheiros" className={`min-h-11 ${CONTROL}`} />
         </div>
         <div className="space-y-1.5">
-          <label htmlFor={`${p}-zona`} className={LABEL}>
-            Zona
+          <label htmlFor={`${p}-cidade`} className={LABEL}>
+            Cidade
           </label>
-          <input id={`${p}-zona`} name="zona" defaultValue={b?.zona ?? "Zona Oeste"} className={`min-h-11 ${CONTROL}`} />
+          <input id={`${p}-cidade`} name="cidade" required defaultValue={b?.cidade ?? "São Paulo"} placeholder="São Paulo" className={`min-h-11 ${CONTROL}`} />
         </div>
+        <div className="space-y-1.5">
+          <label htmlFor={`${p}-estado`} className={LABEL}>
+            Estado
+          </label>
+          <select id={`${p}-estado`} name="estado" required defaultValue={b?.estado ?? "São Paulo"} className={`min-h-11 ${CONTROL}`}>
+            {ESTADOS.map(([nomeUf]) => (
+              <option key={nomeUf} value={nomeUf}>
+                {nomeUf}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
           <label htmlFor={`${p}-teto`} className={LABEL}>
             Teto R$/m²
@@ -81,7 +105,13 @@ function CamposBairro({ b }: { b?: BairroForm }) {
           <label htmlFor={`${p}-pct`} className={LABEL}>
             % abaixo da média
           </label>
-          <input id={`${p}-pct`} name="pct_abaixo_media" inputMode="numeric" defaultValue={b?.pct_abaixo_media ?? 40} className={`tabular min-h-11 ${CONTROL}`} />
+          <input id={`${p}-pct`} name="pct_abaixo_media" inputMode="numeric" defaultValue={b?.pct_abaixo_media ?? 50} className={`tabular min-h-11 ${CONTROL}`} />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor={`${p}-zona`} className={LABEL}>
+            Zona <span className="font-normal text-ink-subtle">(opcional)</span>
+          </label>
+          <input id={`${p}-zona`} name="zona" defaultValue={b?.zona ?? ""} placeholder="ex.: Zona Oeste" className={`min-h-11 ${CONTROL}`} />
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -104,30 +134,41 @@ export default async function VerPage({
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ aba?: string; b?: string }>;
+  searchParams: Promise<{ aba?: string; b?: string; todas?: string }>;
 }) {
   const { token } = await params;
   if (!process.env.RADAR_SHARE_TOKEN || token !== process.env.RADAR_SHARE_TOKEN) notFound();
   const sp = await searchParams;
   const aba: Aba = sp.aba === "criterios" || sp.aba === "alertas" ? sp.aba : "oportunidades";
   const filtroBairro = sp.b || "";
+  const verTodas = sp.todas === "1";
 
   const db = createServiceClient();
+  const [{ data: cfg }, { data: bairros }, { data: palavras }] = await Promise.all([
+    db.from("radar_config").select("*").eq("id", true).maybeSingle(),
+    db.from("radar_bairros").select("*").order("nome"),
+    db.from("radar_palavras").select("*").order("termo"),
+  ]);
+
+  // Padrão: só os bairros da última busca, com o que entrou nela marcado como NOVO — misturar
+  // buscas antigas deixava confuso (feedback 13/10). "ver todas" mostra o histórico inteiro.
+  const bairrosDaBusca: string[] = cfg?.busca_bairros ?? [];
+  const inicioBusca = cfg?.busca_iniciada_em ?? null;
+  const soUltimaBusca = !verTodas && !filtroBairro && bairrosDaBusca.length > 0;
   let qLista = db
     .from("radar_anuncios")
     .select("id,bairro_id,tipo,titulo,url,preco,area,preco_m2,pct_abaixo,motivo,anunciante,visto_em")
     .eq("oportunidade", true)
     .eq("descartado", false)
-    .order("visto_em", { ascending: false })
-    .limit(200);
+    .order("pct_abaixo", { ascending: false, nullsFirst: false })
+    .limit(300);
   if (filtroBairro) qLista = qLista.eq("bairro_id", filtroBairro);
-
-  const [{ data: cfg }, { data: bairros }, { data: palavras }, { data: lista }] = await Promise.all([
-    db.from("radar_config").select("*").eq("id", true).maybeSingle(),
-    db.from("radar_bairros").select("*").order("nome"),
-    db.from("radar_palavras").select("*").order("termo"),
-    qLista,
-  ]);
+  else if (soUltimaBusca) qLista = qLista.in("bairro_id", bairrosDaBusca);
+  const { data: bruta } = await qLista;
+  const ehNovo = (visto: string | null) => !!(inicioBusca && visto && visto >= inicioBusca);
+  // novos primeiro, depois maior deságio
+  const lista = [...(bruta ?? [])].sort((x, y) => Number(ehNovo(y.visto_em)) - Number(ehNovo(x.visto_em)));
+  const qtdNovos = lista.filter((a) => ehNovo(a.visto_em)).length;
   const nome = new Map((bairros ?? []).map((b) => [b.id, b.nome]));
   const ativos = (bairros ?? []).filter((b) => b.ativo);
 
@@ -188,7 +229,7 @@ export default async function VerPage({
             ) : (
               <form action={pedirBusca.bind(null, token)} className="space-y-2">
                 <div className="flex flex-wrap items-start gap-2">
-                  <SelecaoBairros bairros={ativos.map((b) => ({ id: b.id, nome: b.nome, zona: b.zona }))} />
+                  <SelecaoBairros bairros={ativos.map((b) => ({ id: b.id, nome: b.nome, zona: b.zona, cidade: b.cidade }))} />
                   <FormSubmitButton pendingLabel="Enviando…">{emAndamento ? "Buscando…" : "🔎 Buscar"}</FormSubmitButton>
                 </div>
                 <Link href={`${base}?aba=criterios`} className="text-xs text-primary hover:underline">
@@ -200,7 +241,25 @@ export default async function VerPage({
           </Card>
 
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-ink">{(lista ?? []).length} oportunidades</p>
+            <div className="space-y-0.5">
+              <p className="text-sm font-semibold text-ink">
+                {soUltimaBusca ? "Resultado da última busca" : verTodas ? "Todas as oportunidades" : "Oportunidades do bairro"} ·{" "}
+                {lista.length}
+                {qtdNovos > 0 && <span className="font-normal text-ink-muted"> ({qtdNovos} novas nesta busca)</span>}
+              </p>
+              <p className="text-xs text-ink-muted">
+                {soUltimaBusca && <>{bairrosDaBusca.map((id) => nome.get(id)).filter(Boolean).join(", ")} · </>}
+                {verTodas || filtroBairro ? (
+                  <Link href={base} className="text-primary hover:underline">
+                    voltar para a última busca
+                  </Link>
+                ) : (
+                  <Link href={`${base}?todas=1`} className="text-primary hover:underline">
+                    ver todas as buscas
+                  </Link>
+                )}
+              </p>
+            </div>
             <form className="flex items-center gap-2" action={base}>
               <select name="b" defaultValue={filtroBairro} aria-label="Filtrar por bairro" className={`min-h-10 w-auto ${CONTROL}`}>
                 <option value="">Todos os bairros</option>
@@ -217,12 +276,17 @@ export default async function VerPage({
           </div>
 
           <div className="space-y-3">
-            {(lista ?? []).length === 0 && <Card className="p-4 text-sm text-ink-muted">Nenhuma oportunidade.</Card>}
-            {(lista ?? []).map((a) => (
+            {lista.length === 0 && (
+              <Card className="p-4 text-sm text-ink-muted">
+                {soUltimaBusca ? "Nenhuma oportunidade nos bairros da última busca." : "Nenhuma oportunidade."}
+              </Card>
+            )}
+            {lista.map((a) => (
               <Card key={a.id} className="p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
+                      {ehNovo(a.visto_em) && <Badge tone="warn">NOVO</Badge>}
                       <Badge tone="info">{a.bairro_id ? nome.get(a.bairro_id) ?? "—" : "—"}</Badge>
                       {a.tipo && <Badge tone="mute">{ROTULO_TIPO[a.tipo] ?? a.tipo}</Badge>}
                       {a.pct_abaixo !== null && Number(a.pct_abaixo) > 0 && <Badge tone="ok">{Number(a.pct_abaixo)}% abaixo da média</Badge>}
@@ -259,7 +323,9 @@ export default async function VerPage({
             {(bairros ?? []).map((b) => (
               <details key={b.id} className="group">
                 <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-surface-muted">
-                  <span className={`min-w-32 font-semibold ${b.ativo ? "text-ink" : "text-ink-subtle line-through"}`}>{b.nome}</span>
+                  <span className={`min-w-32 font-semibold ${b.ativo ? "text-ink" : "text-ink-subtle line-through"}`}>
+                    {b.nome} <span className="text-xs font-normal text-ink-muted">{b.cidade}/{siglaUf(b.estado)}</span>
+                  </span>
                   <span className="text-sm text-ink">{criterioPreco(b)}</span>
                   <span className="text-xs text-ink-muted">{b.tipos.map((t) => ROTULO_TIPO[t] ?? t).join(", ")}</span>
                   <span className="ml-auto text-xs text-primary group-open:hidden">editar</span>
@@ -271,6 +337,8 @@ export default async function VerPage({
                       id: b.id,
                       nome: b.nome,
                       zona: b.zona,
+                      cidade: b.cidade,
+                      estado: b.estado,
                       teto_m2: b.teto_m2 === null ? null : Number(b.teto_m2),
                       pct_abaixo_media: Number(b.pct_abaixo_media),
                       tipos: b.tipos,

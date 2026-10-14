@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type Bairro = { id: string; nome: string; zona: string };
+type Bairro = { id: string; nome: string; zona: string; cidade: string };
 
 const normalizar = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
@@ -33,12 +33,14 @@ export function SelecaoBairros({ bairros }: { bairros: Bairro[] }) {
 
   const visiveis = useMemo(() => {
     const f = normalizar(filtro.trim());
-    return f ? bairros.filter((b) => normalizar(`${b.nome} ${b.zona}`).includes(f)) : bairros;
+    return f ? bairros.filter((b) => normalizar(`${b.nome} ${b.zona} ${b.cidade}`).includes(f)) : bairros;
   }, [bairros, filtro]);
 
   const porZona = useMemo(() => {
     const g = new Map<string, Bairro[]>();
-    for (const b of visiveis) g.set(b.zona || "Sem zona", [...(g.get(b.zona || "Sem zona") ?? []), b]);
+    // agrupa por cidade (e zona, quando houver): "São Paulo · Zona Oeste", "Curitiba"
+    const grupo = (b: Bairro) => [b.cidade, b.zona].filter(Boolean).join(" · ") || "Outros";
+    for (const b of visiveis) g.set(grupo(b), [...(g.get(grupo(b)) ?? []), b]);
     return [...g.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [visiveis]);
 
@@ -92,7 +94,7 @@ export function SelecaoBairros({ bairros }: { bairros: Bairro[] }) {
             autoFocus
             value={filtro}
             onChange={(e) => setFiltro(e.target.value)}
-            placeholder="filtrar bairro ou zona…"
+            placeholder="filtrar bairro ou cidade…"
             aria-label="Filtrar bairros"
             className="min-h-10 w-full rounded-md border border-border bg-surface-muted px-3 text-sm text-ink focus:border-primary"
           />

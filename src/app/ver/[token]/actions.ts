@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/service";
+import { ESTADOS } from "@/lib/estados";
 
 /**
  * Ações do link sem login. Cada uma confere o segredo do link (RADAR_SHARE_TOKEN) antes de
@@ -28,13 +29,19 @@ export async function salvarBairro(token: string, formData: FormData) {
   const id = texto(formData, "id");
   const nome = texto(formData, "nome");
   if (!nome) throw new Error("Informe o nome do bairro");
-  const pct = numeroOuNulo(formData, "pct_abaixo_media") ?? 40;
+  const cidade = texto(formData, "cidade");
+  const estado = texto(formData, "estado");
+  if (!cidade) throw new Error("Informe a cidade");
+  if (!ESTADOS.some(([n]) => n === estado)) throw new Error("Escolha o estado");
+  const pct = numeroOuNulo(formData, "pct_abaixo_media") ?? 50;
   if (pct >= 95) throw new Error("% abaixo da média precisa ser menor que 95");
   const tipos = formData.getAll("tipos").map(String).filter(Boolean);
   if (tipos.length === 0) throw new Error("Marque pelo menos um tipo de imóvel");
   const linha = {
     nome,
     zona: texto(formData, "zona"),
+    cidade,
+    estado,
     teto_m2: numeroOuNulo(formData, "teto_m2"),
     pct_abaixo_media: pct,
     tipos,

@@ -51,8 +51,9 @@ async function medias(db: Db, bairroId: string): Promise<Record<Grupo, number | 
 }
 
 /**
- * O mesmo imóvel costuma estar anunciado por várias imobiliárias (ids diferentes, mesmo preço e
- * mesma área). Devolve o id da oportunidade que já representa esse imóvel no bairro, se houver.
+ * O mesmo imóvel costuma estar anunciado por várias imobiliárias (ids diferentes, mesma área e
+ * preço igual ou quase — já apareceu R$ 1.200.000 x R$ 1.200.100). Devolve o id da oportunidade
+ * que já representa esse imóvel no bairro, se houver.
  */
 async function mesmaOportunidade(db: Db, bairroId: string, a: AnuncioZap): Promise<string | null> {
   if (!a.preco || !a.area) return null;
@@ -61,8 +62,9 @@ async function mesmaOportunidade(db: Db, bairroId: string, a: AnuncioZap): Promi
     .select("id")
     .eq("bairro_id", bairroId)
     .eq("oportunidade", true)
-    .eq("preco", a.preco)
     .eq("area", a.area)
+    .gte("preco", a.preco * 0.99)
+    .lte("preco", a.preco * 1.01)
     .neq("id", a.id)
     .limit(1);
   return data?.[0]?.id ?? null;
