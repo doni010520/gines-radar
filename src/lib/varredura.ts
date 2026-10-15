@@ -1,6 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Database } from "@/lib/supabase/database.types";
-import { buscarDescricao, buscarPagina, type AnuncioZap } from "./zap";
+import { FONTES, type Anuncio, type Fonte } from "./fontes";
 import { AMOSTRA_MINIMA, GRUPOS, avaliar, grupoDoTipo, mediana, motivoExclusao, palavrasEncontradas, type Grupo } from "./analise";
 import { enviarWhatsApp } from "./whatsapp";
 import { logEvent } from "./log";
@@ -8,11 +8,7 @@ import { logEvent } from "./log";
 type Db = ReturnType<typeof createServiceClient>;
 type Bairro = Database["public"]["Tables"]["radar_bairros"]["Row"];
 
-/** 1ª varredura do bairro: lê esse tanto de páginas só pra aprender a média (30 por página). */
-const PAGINAS_APRENDIZADO = 10;
-/** Varreduras seguintes: lê do mais novo até achar anúncio conhecido, no máximo isso. */
-const PAGINAS_MAX_NOVOS = 5;
-/** Pausa entre abrir um anúncio e outro — não martelar o portal. */
+/** Pausa entre uma requisição e outra ao mesmo portal — não martelar. */
 const PAUSA_MS = 1500;
 
 const dorme = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -21,7 +17,7 @@ const dorme = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Preço por m², ou null quando o anúncio tem preço/área simbólicos ("R$ 1", "sob consulta",
  * área 1 m²) — esses viravam "100% abaixo da média" e poluíam a lista.
  */
-function precoM2(a: AnuncioZap): number | null {
+function precoM2(a: Anuncio): number | null {
   if (!a.preco || !a.area || a.preco < 30_000 || a.area < 10) return null;
   const m2 = Math.round(a.preco / a.area);
   return m2 >= 500 ? m2 : null;
@@ -30,9 +26,9 @@ function precoM2(a: AnuncioZap): number | null {
 const fmt = (n: number) => n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 
 /**
- * Média (mediana) de R$/m² do bairro por grupo, com os anúncios vistos nos últimos 180 dias.
- * Grupo com menos de AMOSTRA_MINIMA anúncios fica sem referência (só palavras-chave valem) —
- * completar com outro grupo distorceria a comparação.
+ * Média (mediana) de R$/m² do bairro por grupo, com os anúncios vistos nos últimos 180 dias
+ * em todos os portais. Grupo com menos de AMOSTRA_MINIMA anúncios fica sem referência (só
+ * palavras-chave valem) — completar com outro grupo distorceria a comparação.
  */
 async function medias(db: Db, bairroId: string): Promise<Record<Grupo, number | null>> {
   const desde = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString();
@@ -42,7 +38,7 @@ async function medias(db: Db, bairroId: string): Promise<Record<Grupo, number | 
     .eq("bairro_id", bairroId)
     .gte("visto_em", desde)
     .not("preco_m2", "is", null)
-    .limit(5000);
+    .limit(10000);
   const grupos: Record<Grupo, number[]> = { terreno: [], casa: [], apartamento: [] };
   for (const r of data ?? []) grupos[grupoDoTipo(r.tipo)].push(Number(r.preco_m2));
   return Object.fromEntries(
@@ -51,11 +47,11 @@ async function medias(db: Db, bairroId: string): Promise<Record<Grupo, number | 
 }
 
 /**
- * O mesmo imóvel costuma estar anunciado por várias imobiliárias (ids diferentes, mesma área e
- * preço igual ou quase — já apareceu R$ 1.200.000 x R$ 1.200.100). Devolve o id da oportunidade
- * que já representa esse imóvel no bairro, se houver.
+ * O mesmo imóvel costuma estar anunciado por várias imobiliárias e em vários portais (ids
+ * diferentes, mesma área e preço igual ou quase — já apareceu R$ 1.200.000 x R$ 1.200.100).
+ * Devolve o id da oportunidade que já representa esse imóvel no bairro, se houver.
  */
-async function mesmaOportunidade(db: Db, bairroId: string, a: AnuncioZap): Promise<string | null> {
+async function mesmaOportunidade(db: Db, bairroId: string, a: Anuncio): Promise<string | null> {
   if (!a.preco || !a.area) return null;
   const { data } = await db
     .from("radar_anuncios")
@@ -70,9 +66,9 @@ async function mesmaOportunidade(db: Db, bairroId: string, a: AnuncioZap): Promi
   return data?.[0]?.id ?? null;
 }
 
-function textoAlerta(b: Bairro, a: AnuncioZap, m2: number | null, pct: number | null, ref: number | null, palavras: string[]) {
+function textoAlerta(b: Bairro, f: Fonte, a: Anuncio, m2: number | null, pct: number | null, ref: number | null, palavras: string[]) {
   return [
-    `🏚️ *Oportunidade — ${b.nome}*`,
+    `🏚️ *Oportunidade — ${b.nome}* (${f.nome})`,
     a.titulo,
     a.preco ? `💰 R$ ${fmt(a.preco)}${m2 ? ` · R$ ${fmt(m2)}/m²` : ""}` : "",
     pct !== null && ref ? `📉 ${pct}% abaixo da referência do bairro (R$ ${fmt(ref)}/m²)` : "",
@@ -84,22 +80,34 @@ function textoAlerta(b: Bairro, a: AnuncioZap, m2: number | null, pct: number | 
     .join("\n");
 }
 
-async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: string | null) {
-  const busca = { nome: b.nome, zona: b.zona, cidade: b.cidade, estado: b.estado };
-  const aprendendo = !b.aprendido_em;
-  const paginas = aprendendo ? PAGINAS_APRENDIZADO : PAGINAS_MAX_NOVOS;
+/** 1ª busca desse bairro nesse portal = ainda não há nenhum anúncio dele gravado. */
+async function aprendendoNoPortal(db: Db, bairroId: string, portal: string): Promise<boolean> {
+  const { count } = await db
+    .from("radar_anuncios")
+    .select("id", { count: "exact", head: true })
+    .eq("bairro_id", bairroId)
+    .eq("portal", portal);
+  return !count;
+}
 
-  // 1. coleta os anúncios novos (do mais recente pro mais antigo)
-  const novos: AnuncioZap[] = [];
+async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[], alertaNumero: string | null) {
+  const busca = { nome: b.nome, zona: b.zona, cidade: b.cidade, estado: b.estado };
+  const aprendendo = await aprendendoNoPortal(db, b.id, f.portal);
+  const paginas = aprendendo ? f.paginasAprendizado : f.paginasNovos;
+
+  // 1. coleta os anúncios ainda não vistos
+  const novos: Anuncio[] = [];
+  const nestaBusca = new Set<string>(); // portal que repete anúncio entre páginas
   for (let p = 0; p < paginas; p++) {
-    const lote = await buscarPagina(busca, p);
+    const lote = (await f.buscarPagina(busca, p)).filter((a) => !nestaBusca.has(a.id));
     if (lote.length === 0) break;
+    lote.forEach((a) => nestaBusca.add(a.id));
     const { data: conhecidos } = await db.from("radar_anuncios").select("id").in("id", lote.map((a) => a.id));
     const jaVistos = new Set((conhecidos ?? []).map((c) => c.id));
     const ineditos = lote.filter((a) => !jaVistos.has(a.id));
     novos.push(...ineditos);
-    // fora do aprendizado, página que já tem anúncio conhecido marca onde parou a última vez
-    if (!aprendendo && ineditos.length < lote.length) break;
+    // portal ordenado por data: página com anúncio conhecido marca onde parou a última vez
+    if (!aprendendo && f.ordenadoPorRecentes && ineditos.length < lote.length) break;
     await dorme(PAUSA_MS);
   }
 
@@ -110,7 +118,7 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
     if (doTipo.length) {
       await db.from("radar_anuncios").upsert(
         doTipo.map((a) => ({
-          id: a.id, portal: "zap", bairro_id: b.id, tipo: a.tipo, titulo: a.titulo, url: a.url,
+          id: a.id, portal: f.portal, bairro_id: b.id, tipo: a.tipo, titulo: a.titulo, url: a.url,
           preco: a.preco, area: a.area, preco_m2: precoM2(a), anunciante: a.anunciante,
           criado_no_portal: a.criadoNoPortal,
         })),
@@ -122,9 +130,8 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
     const refInicial = await medias(db, b.id);
     let oportunidadesIniciais = 0;
     for (const a of doTipo) {
-      const m2 = precoM2(a);
       const av = avaliar({
-        precoM2: m2,
+        precoM2: precoM2(a),
         tetoM2: b.teto_m2 ? Number(b.teto_m2) : null,
         pctAbaixoMedia: Number(b.pct_abaixo_media),
         mediaM2: refInicial[grupoDoTipo(a.tipo)],
@@ -141,8 +148,7 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
       oportunidadesIniciais++;
       await db.from("radar_anuncios").update({ oportunidade: true, motivo: av.motivo, pct_abaixo: av.pctAbaixo }).eq("id", a.id);
     }
-    await db.from("radar_bairros").update({ aprendido_em: new Date().toISOString(), ultima_varredura: new Date().toISOString() }).eq("id", b.id);
-    await logEvent("info", "bairro aprendido", { bairro: b.nome, anuncios: doTipo.length, oportunidades: oportunidadesIniciais });
+    await logEvent("info", "bairro aprendido", { bairro: b.nome, portal: f.portal, anuncios: doTipo.length, oportunidades: oportunidadesIniciais });
     return { novos: doTipo.length, oportunidades: oportunidadesIniciais };
   }
 
@@ -152,7 +158,7 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
   for (const a of doTipo) {
     let descricao = "";
     try {
-      descricao = await buscarDescricao(a.url);
+      descricao = await f.buscarDescricao(a.url);
     } catch (err) {
       await logEvent("warn", "não consegui ler a descrição", { id: a.id, error: String(err) });
     }
@@ -174,11 +180,11 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
       av.motivo = `excluído: ${exclusao}`;
     } else if (repetido) {
       av.oportunidade = false;
-      av.motivo = `mesmo imóvel de ${repetido} (outra imobiliária)`;
+      av.motivo = `mesmo imóvel de ${repetido} (outro anúncio)`;
     }
 
     const { error } = await db.from("radar_anuncios").insert({
-      id: a.id, portal: "zap", bairro_id: b.id, tipo: a.tipo, titulo: a.titulo, url: a.url,
+      id: a.id, portal: f.portal, bairro_id: b.id, tipo: a.tipo, titulo: a.titulo, url: a.url,
       preco: a.preco, area: a.area, preco_m2: m2, descricao, palavras, anunciante: a.anunciante,
       criado_no_portal: a.criadoNoPortal, oportunidade: av.oportunidade, motivo: av.motivo || null,
       pct_abaixo: av.pctAbaixo,
@@ -189,23 +195,22 @@ async function varrerBairro(db: Db, b: Bairro, termos: string[], alertaNumero: s
 
     if (alertaNumero) {
       try {
-        await enviarWhatsApp(alertaNumero, textoAlerta(b, a, m2, av.pctAbaixo, av.referenciaM2, palavras));
+        await enviarWhatsApp(alertaNumero, textoAlerta(b, f, a, m2, av.pctAbaixo, av.referenciaM2, palavras));
         await db.from("radar_anuncios").update({ alertado_em: new Date().toISOString() }).eq("id", a.id);
       } catch (err) {
         await logEvent("error", "falha ao enviar alerta", { id: a.id, error: String(err) });
       }
     }
   }
-
-  await db.from("radar_bairros").update({ ultima_varredura: new Date().toISOString() }).eq("id", b.id);
   return { novos: doTipo.length, oportunidades };
 }
 
 let rodando = false;
 
 /**
- * Uma busca: os bairros escolhidos (ou todos os ativos, se a lista vier vazia). Sob demanda — só roda quando
- * alguém aperta "Buscar agora". Status e resultado ficam em radar_config pra tela acompanhar.
+ * Uma busca: os bairros escolhidos (ou todos os ativos, se a lista vier vazia), em todas as
+ * fontes. Sob demanda — só roda quando alguém aperta "Buscar". Status e resultado ficam em
+ * radar_config pra tela acompanhar. Portal que falha não derruba os outros.
  */
 export async function rodarVarredura(
   opts: { bairroIds?: string[] | null } = {}
@@ -229,22 +234,35 @@ export async function rodarVarredura(
     const termos = (palavras ?? []).map((p) => p.termo);
     const alertaNumero = config?.alerta_numero?.trim() || process.env.RADAR_ALERTA_NUMERO?.trim() || null;
     const total = { bairros: 0, novos: 0, oportunidades: 0 };
+    const porPortal: Record<string, number> = {};
     const erros: string[] = [];
     for (const b of bairros ?? []) {
-      try {
-        const r = await varrerBairro(db, b, termos, alertaNumero);
+      let algumPortalOk = false;
+      for (const f of FONTES) {
+        try {
+          const r = await varrerBairroNaFonte(db, b, f, termos, alertaNumero);
+          algumPortalOk = true;
+          total.novos += r.novos;
+          total.oportunidades += r.oportunidades;
+          porPortal[f.nome] = (porPortal[f.nome] ?? 0) + r.novos;
+        } catch (err) {
+          erros.push(`${b.nome} (${f.nome}): ${String(err).slice(0, 160)}`);
+          await logEvent("error", "falha na busca do bairro", { bairro: b.nome, portal: f.portal, error: String(err) });
+        }
+      }
+      if (algumPortalOk) {
         total.bairros++;
-        total.novos += r.novos;
-        total.oportunidades += r.oportunidades;
-      } catch (err) {
-        erros.push(`${b.nome}: ${String(err).slice(0, 160)}`);
-        await logEvent("error", "falha na busca do bairro", { bairro: b.nome, error: String(err) });
+        const agora = new Date().toISOString();
+        await db
+          .from("radar_bairros")
+          .update({ ultima_varredura: agora, ...(b.aprendido_em ? {} : { aprendido_em: agora }) })
+          .eq("id", b.id);
       }
     }
-    await logEvent("info", "busca concluída", { ...total, erros: erros.length });
+    await logEvent("info", "busca concluída", { ...total, porPortal, erros: erros.length });
     await db
       .from("radar_config")
-      .update({ busca_status: erros.length && !total.bairros ? "erro" : "concluida", busca_resultado: { ...total, erros } })
+      .update({ busca_status: erros.length && !total.bairros ? "erro" : "concluida", busca_resultado: { ...total, porPortal, erros } })
       .eq("id", true);
     return total;
   } catch (err) {

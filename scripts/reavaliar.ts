@@ -16,7 +16,7 @@ for (const linha of readFileSync(join(process.cwd(), ".env.coletor"), "utf8").sp
 async function main() {
   const { createServiceClient } = await import("../src/lib/supabase/service");
   const { AMOSTRA_MINIMA, GRUPOS, avaliar, grupoDoTipo, mediana, motivoExclusao, palavrasEncontradas } = await import("../src/lib/analise");
-  const { buscarDescricao } = await import("../src/lib/zap");
+  const { fontePorPortal } = await import("../src/lib/fontes");
   const comDescricoes = process.argv.includes("--descricoes");
   const db = createServiceClient();
 
@@ -54,7 +54,7 @@ async function main() {
       });
       if (preliminar.oportunidade && comDescricoes && !descricao) {
         try {
-          descricao = await buscarDescricao(a.url ?? "");
+          descricao = (await fontePorPortal(a.portal)?.buscarDescricao(a.url ?? "")) ?? "";
           palavrasAchadas = palavrasEncontradas(`${a.titulo}\n${descricao}`, termos);
           await new Promise((r) => setTimeout(r, 1500));
         } catch (err) {

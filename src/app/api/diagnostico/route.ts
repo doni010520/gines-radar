@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { execFile } from "node:child_process";
-import { argsProxy } from "@/lib/zap";
+import { argsProxy } from "@/lib/fontes/http";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
