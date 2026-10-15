@@ -15,7 +15,7 @@ for (const linha of readFileSync(join(process.cwd(), ".env.coletor"), "utf8").sp
 
 async function main() {
   const { createServiceClient } = await import("../src/lib/supabase/service");
-  const { AMOSTRA_MINIMA, GRUPOS, avaliar, grupoDoTipo, mediana, palavrasEncontradas } = await import("../src/lib/analise");
+  const { AMOSTRA_MINIMA, GRUPOS, avaliar, grupoDoTipo, mediana, motivoExclusao, palavrasEncontradas } = await import("../src/lib/analise");
   const { buscarDescricao } = await import("../src/lib/zap");
   const comDescricoes = process.argv.includes("--descricoes");
   const db = createServiceClient();
@@ -70,8 +70,12 @@ async function main() {
       });
       let motivo = av.motivo || null;
       let oportunidade = av.oportunidade;
-      const igual = oportunidade ? repetida(Number(a.preco), Number(a.area)) : undefined;
-      if (igual) {
+      const exclusao = oportunidade ? motivoExclusao(`${a.titulo}\n${a.anunciante ?? ""}\n${descricao ?? ""}`) : null;
+      const igual = oportunidade && !exclusao ? repetida(Number(a.preco), Number(a.area)) : undefined;
+      if (exclusao) {
+        oportunidade = false;
+        motivo = `excluído: ${exclusao}`;
+      } else if (igual) {
         oportunidade = false;
         motivo = `mesmo imóvel de ${igual.id} (outra imobiliária)`;
       } else if (oportunidade) {

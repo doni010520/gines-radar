@@ -16,6 +16,20 @@ export function normalizar(texto: string): string {
     .replace(/\s+/g, " ");
 }
 
+/**
+ * Critério de exclusão do Gines (14/10/26): leilão e imóvel vendido por banco não interessam.
+ * Devolve o motivo, se o texto do anúncio (título, anunciante, descrição) indicar um deles.
+ */
+const EXCLUSOES: [RegExp, string][] = [
+  [/\bleilao\b|\bleiloes\b|leiloeir|arrematac|arrematant|lance minimo|\b[12]\S? praca\b/, "leilão"],
+  // nome de banco sozinho não exclui: descrição comum cita "agências Itaú e Santander por perto"
+  [/imovel retomado|retomado pelo banco|venda direta (da )?caixa|imovel da caixa|imovel de banco|consolidacao da propriedade|alienacao fiduciaria/, "imóvel de banco"],
+];
+export function motivoExclusao(texto: string): string | null {
+  const t = normalizar(texto);
+  return EXCLUSOES.find(([re]) => re.test(t))?.[1] ?? null;
+}
+
 export function palavrasEncontradas(texto: string, termos: string[]): string[] {
   const t = normalizar(texto);
   return termos.filter((termo) => t.includes(normalizar(termo)));
