@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { execFile } from "node:child_process";
-import { argsProxy } from "@/lib/fontes/http";
+import { argsProxy, consumo, sitesViaProxy } from "@/lib/fontes/http";
+import { FONTES } from "@/lib/fontes";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -104,12 +105,43 @@ async function testarAnuncio(url: string) {
   return { versao, ...out };
 }
 
+/**
+ * Cada fonte a partir do servidor: 1ª página do bairro + 1 descrição. Mostra quais sites
+ * passaram direto e quais precisaram do proxy, e quanto cada saída gastou. Não grava nada.
+ */
+async function testarFontes(bairro: string, cidade: string, estado: string) {
+  const b = { nome: bairro, zona: "", cidade, estado };
+  const out: Record<string, unknown> = {};
+  for (const f of FONTES) {
+    const antes = { proxy: consumo.proxy.bytes, direto: consumo.direto.bytes };
+    const t0 = Date.now();
+    try {
+      const lote = await f.buscarPagina(b, 0);
+      const desc = lote[0] ? await f.buscarDescricao(lote[0].url) : "";
+      out[f.nome] = {
+        anuncios: lote.length,
+        descricao: desc.length,
+        ms: Date.now() - t0,
+        proxyKB: Math.round((consumo.proxy.bytes - antes.proxy) / 1024),
+        diretoKB: Math.round((consumo.direto.bytes - antes.direto) / 1024),
+      };
+    } catch (err) {
+      out[f.nome] = { erro: String(err).slice(0, 200), ms: Date.now() - t0 };
+    }
+  }
+  return { bairro, sitesViaProxy: sitesViaProxy(), fontes: out };
+}
+
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token") ?? req.headers.get("x-radar-token");
   if (!process.env.RADAR_TOKEN || token !== process.env.RADAR_TOKEN) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
-  const anuncio = req.nextUrl.searchParams.get("anuncio");
+  const sp = req.nextUrl.searchParams;
+  if (sp.get("fontes")) {
+    return NextResponse.json(await testarFontes(sp.get("bairro") || "Vila Madalena", sp.get("cidade") || "São Paulo", sp.get("estado") || "São Paulo"));
+  }
+  const anuncio = sp.get("anuncio");
   if (anuncio) return NextResponse.json(await testarAnuncio(anuncio));
   const out: Record<string, unknown> = {};
   for (const [nome, url] of Object.entries(ALVOS)) {

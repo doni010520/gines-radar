@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Database } from "@/lib/supabase/database.types";
 import { FONTES, type Anuncio, type Fonte } from "./fontes";
+import { consumo } from "./fontes/http";
 import { avaliar, calcularReferencias, motivoExclusao, palavrasEncontradas, referenciaDe, type Referencias } from "./analise";
 import { enviarWhatsApp } from "./whatsapp";
 import { logEvent } from "./log";
@@ -88,6 +89,25 @@ function textoAlerta(b: Bairro, f: Fonte, a: Anuncio, m2: number | null, pct: nu
     .join("\n");
 }
 
+/** Margem abaixo do corte em que já vale ler a descrição (corte 50% → abre a partir de 30%). */
+const MARGEM_DESCRICAO = 20;
+
+/**
+ * Vale abrir a página do anúncio? Sim se o preço já está a até MARGEM_DESCRICAO pontos do corte
+ * (ou perto do teto), se o bairro ainda não tem referência pra esse tipo (aí só a palavra-chave
+ * decide) ou se o título já cita palavra-chave. Anúncio caro não vira oportunidade nem com
+ * "reforma" no texto — o Gines quer desconto real.
+ */
+function precisaDescricao(a: Anuncio, b: Bairro, ref: Referencias, termos: string[]): boolean {
+  if (palavrasEncontradas(a.titulo, termos).length) return true;
+  const m2 = precoM2(a);
+  if (!m2) return false;
+  if (b.teto_m2) return m2 <= Number(b.teto_m2) * 1.25;
+  const media = referenciaDe(ref, a.tipo, a.area);
+  if (!media) return true;
+  return (1 - m2 / media) * 100 >= Number(b.pct_abaixo_media) - MARGEM_DESCRICAO;
+}
+
 /** 1ª busca desse bairro nesse portal = ainda não há nenhum anúncio dele gravado. */
 async function aprendendoNoPortal(db: Db, bairroId: string, portal: string): Promise<boolean> {
   const { count } = await db
@@ -167,9 +187,12 @@ async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[]
   // levavam ~10 min um a um (15/10/26)
   const descricoes = new Map<string, string>();
   const paralelo = f.descricoesEmParalelo ?? DESCRICOES_EM_PARALELO;
-  for (let i = 0; i < doTipo.length; i += paralelo) {
+  // a página do anúncio é o que mais gasta proxy (300 KB a 1 MB cada): só abre de quem já está
+  // perto de ser oportunidade pelo preço, ou já cita palavra-chave no título (15/10/26)
+  const abrir = doTipo.filter((a) => precisaDescricao(a, b, ref, termos));
+  for (let i = 0; i < abrir.length; i += paralelo) {
     await Promise.all(
-      doTipo.slice(i, i + paralelo).map(async (a) => {
+      abrir.slice(i, i + paralelo).map(async (a) => {
         try {
           descricoes.set(a.id, await f.buscarDescricao(a.url));
         } catch (err) {
@@ -251,6 +274,8 @@ export async function rodarVarredura(
     ]);
 
     const termos = (palavras ?? []).map((p) => p.termo);
+    const proxyAntes = consumo.proxy.bytes;
+    const diretoAntes = consumo.direto.bytes;
     const alertaNumero = config?.alerta_numero?.trim() || process.env.RADAR_ALERTA_NUMERO?.trim() || null;
     const total = { bairros: 0, novos: 0, oportunidades: 0 };
     const porPortal: Record<string, number> = {};
@@ -278,10 +303,15 @@ export async function rodarVarredura(
           .eq("id", b.id);
       }
     }
-    await logEvent("info", "busca concluída", { ...total, porPortal, erros: erros.length });
+    // MB gastos nesta busca (o plano do proxy é por GB)
+    const trafego = {
+      proxyMB: Math.round(((consumo.proxy.bytes - proxyAntes) / 1e6) * 10) / 10,
+      diretoMB: Math.round(((consumo.direto.bytes - diretoAntes) / 1e6) * 10) / 10,
+    };
+    await logEvent("info", "busca concluída", { ...total, porPortal, ...trafego, erros: erros.length });
     await db
       .from("radar_config")
-      .update({ busca_status: erros.length && !total.bairros ? "erro" : "concluida", busca_resultado: { ...total, porPortal, erros } })
+      .update({ busca_status: erros.length && !total.bairros ? "erro" : "concluida", busca_resultado: { ...total, porPortal, ...trafego, erros } })
       .eq("id", true);
     return total;
   } catch (err) {

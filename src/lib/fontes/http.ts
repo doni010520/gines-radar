@@ -9,7 +9,7 @@ import { execFile } from "node:child_process";
 export type Resposta = { status: number; corpo: string };
 
 /**
- * Saída residencial (Webshare): o IP do servidor é bloqueado pelos portais.
+ * Saída residencial (Webshare): o IP do servidor é bloqueado por alguns portais.
  * p.webshare.io é um geo-DNS com dezenas de IPs e o DNS do container não resolve (13/10/26) —
  * com proxy, o curl resolve nomes por DNS-over-HTTPS.
  */
@@ -21,23 +21,51 @@ export function argsProxy(): string[] {
 /** A mensagem de erro do execFile repete a linha de comando — tira a senha do proxy dela. */
 const semSenha = (texto: string) => texto.replace(/(\/\/[^:\s/]+:)[^@\s]+@/g, "$1***@");
 
-function baixarUmaVez(url: string, headers: Record<string, string>, opts: { metodo?: string; corpo?: string }): Promise<Resposta> {
-  const args = ["-sSL", "--compressed", "--max-time", "30", "-w", "\n%{http_code}", ...argsProxy()];
+/**
+ * Consumo desde que o processo subiu, separado por saída — o plano do proxy é por GB
+ * (1 GB/mês em 15/10/26), então a busca registra quanto gastou dele.
+ */
+export const consumo = { direto: { requisicoes: 0, bytes: 0 }, proxy: { requisicoes: 0, bytes: 0 } };
+
+function baixarUmaVez(
+  url: string,
+  headers: Record<string, string>,
+  opts: { metodo?: string; corpo?: string },
+  viaProxy: boolean
+): Promise<Resposta> {
+  const args = ["-sSL", "--compressed", "--max-time", "30", "-w", "\n%{http_code} %{size_download}", ...(viaProxy ? argsProxy() : [])];
   for (const [k, v] of Object.entries(headers)) args.push("-H", `${k}: ${v}`);
   if (opts.metodo) args.push("-X", opts.metodo);
   if (opts.corpo !== undefined) args.push("--data-raw", opts.corpo);
   args.push(url);
   return new Promise((resolve, reject) => {
     execFile("curl", args, { maxBuffer: 30 * 1024 * 1024 }, (err, stdout) => {
+      const saida = viaProxy ? consumo.proxy : consumo.direto;
+      saida.requisicoes++;
       if (err) return reject(new Error(`curl falhou: ${semSenha(err.message).split("\n").slice(-2).join(" ")}`));
       const i = stdout.lastIndexOf("\n");
-      resolve({ status: Number(stdout.slice(i + 1)), corpo: stdout.slice(0, i) });
+      const [status, bytes] = stdout.slice(i + 1).split(" ").map(Number);
+      saida.bytes += bytes || 0;
+      resolve({ status, corpo: stdout.slice(0, i) });
     });
   });
 }
 
 /**
- * Com proxy rotativo cada tentativa sai por outro IP: falha de conexão, bloqueio (403/429) ou
+ * Bloqueio de robô: 403/429 ou página curta de desafio (Cloudflare, CAPTCHA). Página grande que
+ * só cita "captcha" num script não conta — é o site normal.
+ */
+function bloqueado(r: Resposta): boolean {
+  if (r.status === 403 || r.status === 429) return true;
+  return r.corpo.length < 30_000 && /cf-chl|challenge-platform|attention required|just a moment|bot_challenge|captcha/i.test(r.corpo);
+}
+
+/** Sites que bloquearam o acesso direto: dali em diante (até o processo reiniciar) vão pelo proxy. */
+const precisaProxy = new Set<string>();
+
+/**
+ * Tenta primeiro direto (sem gastar proxy). Se o site bloquear, passa a usar o proxy pra esse
+ * site. Pelo proxy rotativo cada tentativa sai por outro IP: falha de conexão, bloqueio ou
  * erro do portal (5xx) ganham mais duas chances antes de desistir.
  */
 export async function baixar(
@@ -45,19 +73,36 @@ export async function baixar(
   headers: Record<string, string>,
   opts: { metodo?: string; corpo?: string } = {}
 ): Promise<Resposta> {
-  const tentativas = process.env.RADAR_PROXY ? 3 : 1;
-  let ultimo: Resposta | Error = new Error("sem tentativa");
-  for (let t = 1; t <= tentativas; t++) {
+  const site = new URL(url).host;
+  const temProxy = !!process.env.RADAR_PROXY;
+
+  if (!temProxy || !precisaProxy.has(site)) {
     try {
-      ultimo = await baixarUmaVez(url, headers, opts);
-      if (![403, 429].includes(ultimo.status) && ultimo.status < 500) return ultimo;
+      const direto = await baixarUmaVez(url, headers, opts, false);
+      if (!temProxy || (!bloqueado(direto) && direto.status < 500)) return direto;
+      if (bloqueado(direto)) precisaProxy.add(site);
+    } catch (err) {
+      if (!temProxy) throw err;
+    }
+  }
+
+  let ultimo: Resposta | Error = new Error("sem tentativa");
+  for (let t = 1; t <= 3; t++) {
+    try {
+      ultimo = await baixarUmaVez(url, headers, opts, true);
+      if (!bloqueado(ultimo) && ultimo.status < 500) return ultimo;
     } catch (err) {
       ultimo = err instanceof Error ? err : new Error(String(err));
     }
-    if (t < tentativas) await new Promise((r) => setTimeout(r, 2000));
+    if (t < 3) await new Promise((r) => setTimeout(r, 2000));
   }
   if (ultimo instanceof Error) throw ultimo;
   return ultimo;
+}
+
+/** Sites que estão indo pelo proxy (pra tela de diagnóstico). */
+export function sitesViaProxy(): string[] {
+  return [...precisaProxy];
 }
 
 export const UA =
