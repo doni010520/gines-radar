@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // controla o Chromium do sistema (OLX/Mercado Livre); não dá pra empacotar no bundle
+  serverExternalPackages: ["playwright-core"],
   experimental: {
     // padrão é 1MB — cadastro de imóvel manda vídeo+PDF+fotos numa Server Action só,
     // qualquer mídia de celular estoura isso na hora (mesmo bug documentado no Corrêa/MVF)

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { execFile } from "node:child_process";
 import { argsProxy, consumo, sitesViaProxy } from "@/lib/fontes/http";
 import { FONTES } from "@/lib/fontes";
+import { abrirPagina, fecharNavegadores } from "@/lib/fontes/navegador";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -138,6 +139,29 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
   const sp = req.nextUrl.searchParams;
+  // navegador de verdade no servidor (OLX / Mercado Livre): abre a URL e resume o resultado
+  const urlNavegador = sp.get("navegador");
+  if (urlNavegador) {
+    const antes = { proxy: consumo.proxy.bytes, direto: consumo.direto.bytes };
+    const t0 = Date.now();
+    try {
+      const r = await abrirPagina(urlNavegador);
+      return NextResponse.json({
+        status: r.status,
+        url: r.url,
+        tamanho: r.html.length,
+        ms: Date.now() - t0,
+        ...resumo(r.html),
+        sitesViaProxy: sitesViaProxy(),
+        proxyKB: Math.round((consumo.proxy.bytes - antes.proxy) / 1024),
+        diretoKB: Math.round((consumo.direto.bytes - antes.direto) / 1024),
+      });
+    } catch (err) {
+      return NextResponse.json({ erro: String(err).slice(0, 500), ms: Date.now() - t0 });
+    } finally {
+      await fecharNavegadores();
+    }
+  }
   if (sp.get("fontes")) {
     return NextResponse.json(await testarFontes(sp.get("bairro") || "Vila Madalena", sp.get("cidade") || "São Paulo", sp.get("estado") || "São Paulo"));
   }

@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import type { Database } from "@/lib/supabase/database.types";
 import { FONTES, type Anuncio, type Fonte } from "./fontes";
 import { consumo } from "./fontes/http";
+import { fecharNavegadores } from "./fontes/navegador";
 import { avaliar, calcularReferencias, motivoExclusao, palavrasEncontradas, referenciaDe, type Referencias } from "./analise";
 import { enviarWhatsApp } from "./whatsapp";
 import { logEvent } from "./log";
@@ -319,5 +320,7 @@ export async function rodarVarredura(
     throw err;
   } finally {
     rodando = false;
+    // OLX / Mercado Livre abrem um Chromium (~400 MB): não fica aberto entre buscas
+    await fecharNavegadores();
   }
 }
