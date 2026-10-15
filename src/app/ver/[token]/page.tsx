@@ -179,7 +179,18 @@ export default async function VerPage({
   const coletorOnline = coletorMin !== null && coletorMin <= 2;
   const status = cfg?.busca_status ?? "parada";
   const emAndamento = status === "aguardando" || status === "rodando";
-  const resultado = (cfg?.busca_resultado ?? null) as { novos?: number; oportunidades?: number; erros?: string[]; erro?: string } | null;
+  const resultado = (cfg?.busca_resultado ?? null) as {
+    novos?: number;
+    oportunidades?: number;
+    porPortal?: Record<string, number>;
+    erros?: string[];
+    erro?: string;
+  } | null;
+  const detalhePortais = Object.entries(resultado?.porPortal ?? {})
+    .filter(([, n]) => n > 0)
+    .map(([nomePortal, n]) => `${nomePortal} ${n}`)
+    .join(" · ");
+  const falhas = resultado?.erros?.length ?? 0;
   const textoStatus =
     status === "aguardando"
       ? coletorOnline
@@ -188,7 +199,7 @@ export default async function VerPage({
       : status === "rodando"
         ? "Buscando… a lista atualiza sozinha."
         : status === "concluida"
-          ? `Última busca (${dataHora(cfg?.busca_iniciada_em)}): ${resultado?.novos ?? 0} anúncios novos analisados, ${resultado?.oportunidades ?? 0} oportunidades novas.`
+          ? `Última busca (${dataHora(cfg?.busca_iniciada_em)}): ${resultado?.novos ?? 0} anúncios novos analisados, ${resultado?.oportunidades ?? 0} oportunidades novas.${detalhePortais ? ` (${detalhePortais})` : ""}${falhas ? ` ${falhas} portal(is) com falha nesta busca.` : ""}`
           : status === "erro"
             ? `A última busca falhou: ${resultado?.erros?.[0] ?? resultado?.erro ?? "erro desconhecido"}`
             : "";

@@ -25,9 +25,15 @@ const EXCLUSOES: [RegExp, string][] = [
   // nome de banco sozinho não exclui: descrição comum cita "agências Itaú e Santander por perto"
   [/imovel retomado|retomado pelo banco|venda direta (da )?caixa|imovel da caixa|imovel de banco|consolidacao da propriedade|alienacao fiduciaria/, "imóvel de banco"],
 ];
-export function motivoExclusao(texto: string): string | null {
+export function motivoExclusao(texto: string, titulo = ""): string | null {
   const t = normalizar(texto);
-  return EXCLUSOES.find(([re]) => re.test(t))?.[1] ?? null;
+  const porTexto = EXCLUSOES.find(([re]) => re.test(t))?.[1];
+  if (porTexto) return porTexto;
+  // portal às vezes cadastra loja como "apartamento" (Proprietário Direto, 15/10/26). Só o título
+  // conta: descrição de casa costuma dizer "aceita uso comercial".
+  return /\b(loja|ponto|sala|predio|casa|imovel|galpao|conjunto) comercial\b|\bgalpao\b|\bsalao comercial\b/.test(normalizar(titulo))
+    ? "imóvel comercial"
+    : null;
 }
 
 export function palavrasEncontradas(texto: string, termos: string[]): string[] {
@@ -58,6 +64,52 @@ export function mediana(valores: number[]): number | null {
 
 /** Abaixo disso a "média" do bairro ainda não é confiável pra comparar. */
 export const AMOSTRA_MINIMA = 15;
+
+/**
+ * Faixas de tamanho: o R$/m² cai conforme o imóvel cresce (studio novo de 25 m² sai muito mais
+ * caro por m² que um apartamento antigo de 150 m²). Comparar tudo junto fazia todo apartamento
+ * grande de Pinheiros parecer "50% abaixo" (15/10/26).
+ */
+const FAIXAS: [number, string][] = [
+  [50, "até 50 m²"],
+  [90, "50–90 m²"],
+  [150, "90–150 m²"],
+  [250, "150–250 m²"],
+  [Infinity, "mais de 250 m²"],
+];
+export function faixaDeArea(area: number | null): string | null {
+  if (!area) return null;
+  return FAIXAS.find(([limite]) => area < limite)?.[1] ?? null;
+}
+
+/** Medianas do bairro: por grupo e por grupo + faixa de tamanho. */
+export type Referencias = Map<string, number>;
+
+export function calcularReferencias(linhas: { tipo: string | null; area: number | null; preco_m2: number | null }[]): Referencias {
+  const amostras = new Map<string, number[]>();
+  const junta = (chave: string, v: number) => amostras.set(chave, [...(amostras.get(chave) ?? []), v]);
+  for (const l of linhas) {
+    if (!l.tipo || !l.preco_m2) continue;
+    const g = grupoDoTipo(l.tipo);
+    junta(g, Number(l.preco_m2));
+    const f = faixaDeArea(l.area ? Number(l.area) : null);
+    if (f) junta(`${g}|${f}`, Number(l.preco_m2));
+  }
+  const ref: Referencias = new Map();
+  for (const [chave, v] of amostras) {
+    const m = v.length >= AMOSTRA_MINIMA ? mediana(v) : null;
+    if (m) ref.set(chave, m);
+  }
+  return ref;
+}
+
+/** Referência de um anúncio: mediana do mesmo tipo e faixa de tamanho; sem amostra, a do tipo. */
+export function referenciaDe(ref: Referencias, tipo: string | null, area: number | null): number | null {
+  if (!tipo) return null;
+  const g = grupoDoTipo(tipo);
+  const f = faixaDeArea(area);
+  return (f ? ref.get(`${g}|${f}`) : undefined) ?? ref.get(g) ?? null;
+}
 
 export type Avaliacao = {
   oportunidade: boolean;

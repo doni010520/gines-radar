@@ -1,7 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Database } from "@/lib/supabase/database.types";
 import { FONTES, type Anuncio, type Fonte } from "./fontes";
-import { AMOSTRA_MINIMA, GRUPOS, avaliar, grupoDoTipo, mediana, motivoExclusao, palavrasEncontradas, type Grupo } from "./analise";
+import { avaliar, calcularReferencias, motivoExclusao, palavrasEncontradas, referenciaDe, type Referencias } from "./analise";
 import { enviarWhatsApp } from "./whatsapp";
 import { logEvent } from "./log";
 
@@ -28,29 +28,35 @@ function precoM2(a: Anuncio): number | null {
 const fmt = (n: number) => n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 
 /**
- * Média (mediana) de R$/m² do bairro por grupo, com os anúncios vistos nos últimos 180 dias
- * em todos os portais. Grupo com menos de AMOSTRA_MINIMA anúncios fica sem referência (só
+ * Medianas de R$/m² do bairro (por tipo e por tipo + faixa de tamanho), com os anúncios vistos
+ * nos últimos 180 dias em todos os portais. Sem amostra suficiente não há referência (só
  * palavras-chave valem) — completar com outro grupo distorceria a comparação.
  */
-async function medias(db: Db, bairroId: string): Promise<Record<Grupo, number | null>> {
+async function medias(db: Db, bairroId: string): Promise<Referencias> {
   const desde = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString();
-  const { data } = await db
-    .from("radar_anuncios")
-    .select("tipo,preco_m2")
-    .eq("bairro_id", bairroId)
-    .gte("visto_em", desde)
-    .not("preco_m2", "is", null)
-    .limit(10000);
-  const grupos: Record<Grupo, number[]> = { terreno: [], casa: [], apartamento: [] };
-  for (const r of data ?? []) grupos[grupoDoTipo(r.tipo)].push(Number(r.preco_m2));
-  return Object.fromEntries(
-    GRUPOS.map((g) => [g, grupos[g].length >= AMOSTRA_MINIMA ? mediana(grupos[g]) : null])
-  ) as Record<Grupo, number | null>;
+  // o banco devolve no máximo 1000 linhas por consulta: pagina (Pinheiros já passa de 1700)
+  const linhas: { tipo: string | null; area: number | null; preco_m2: number | null }[] = [];
+  for (let de = 0; ; de += 1000) {
+    const { data } = await db
+      .from("radar_anuncios")
+      .select("tipo,area,preco_m2")
+      .eq("bairro_id", bairroId)
+      .gte("visto_em", desde)
+      .not("preco_m2", "is", null)
+      .order("id")
+      .range(de, de + 999);
+    for (const r of data ?? []) {
+      linhas.push({ tipo: r.tipo, area: r.area === null ? null : Number(r.area), preco_m2: r.preco_m2 === null ? null : Number(r.preco_m2) });
+    }
+    if (!data || data.length < 1000) break;
+  }
+  return calcularReferencias(linhas);
 }
 
 /**
  * O mesmo imóvel costuma estar anunciado por várias imobiliárias e em vários portais (ids
- * diferentes, mesma área e preço igual ou quase — já apareceu R$ 1.200.000 x R$ 1.200.100).
+ * diferentes, mesma área e preço igual ou quase — já apareceu R$ 1.200.000 x R$ 1.200.100, e a
+ * mesma casa a R$ 815 mil no QuintoAndar e R$ 839 mil na Loft).
  * Devolve o id da oportunidade que já representa esse imóvel no bairro, se houver.
  */
 async function mesmaOportunidade(db: Db, bairroId: string, a: Anuncio): Promise<string | null> {
@@ -61,8 +67,8 @@ async function mesmaOportunidade(db: Db, bairroId: string, a: Anuncio): Promise<
     .eq("bairro_id", bairroId)
     .eq("oportunidade", true)
     .eq("area", a.area)
-    .gte("preco", a.preco * 0.99)
-    .lte("preco", a.preco * 1.01)
+    .gte("preco", a.preco * 0.95)
+    .lte("preco", a.preco * 1.05)
     .neq("id", a.id)
     .limit(1);
   return data?.[0]?.id ?? null;
@@ -113,7 +119,8 @@ async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[]
     await dorme(f.pausaMs ?? PAUSA_MS);
   }
 
-  const doTipo = novos.filter((a) => !a.tipo || b.tipos.includes(a.tipo));
+  // sem tipo residencial (comercial, prédio, rural) fica de fora — nem entra na média
+  const doTipo = novos.filter((a) => a.tipo && b.tipos.includes(a.tipo));
 
   if (aprendendo) {
     // registra pra formar a média; na 1ª passada nada vira alerta de WhatsApp
@@ -136,12 +143,12 @@ async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[]
         precoM2: precoM2(a),
         tetoM2: b.teto_m2 ? Number(b.teto_m2) : null,
         pctAbaixoMedia: Number(b.pct_abaixo_media),
-        mediaM2: refInicial[grupoDoTipo(a.tipo)],
+        mediaM2: referenciaDe(refInicial, a.tipo, a.area),
         palavras: [],
       });
       if (!av.oportunidade) continue;
       // leilão / imóvel de banco: critério de exclusão do Gines (na 1ª leva só há título e anunciante)
-      const exclusao = motivoExclusao(`${a.titulo}\n${a.anunciante ?? ""}`);
+      const exclusao = motivoExclusao(`${a.titulo}\n${a.anunciante ?? ""}`, a.titulo);
       if (exclusao) {
         await db.from("radar_anuncios").update({ motivo: `excluído: ${exclusao}` }).eq("id", a.id);
         continue;
@@ -182,10 +189,10 @@ async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[]
       precoM2: m2,
       tetoM2: b.teto_m2 ? Number(b.teto_m2) : null,
       pctAbaixoMedia: Number(b.pct_abaixo_media),
-      mediaM2: ref[grupoDoTipo(a.tipo)],
+      mediaM2: referenciaDe(ref, a.tipo, a.area),
       palavras,
     });
-    const exclusao = av.oportunidade ? motivoExclusao(`${a.titulo}\n${a.anunciante ?? ""}\n${descricao}`) : null;
+    const exclusao = av.oportunidade ? motivoExclusao(`${a.titulo}\n${a.anunciante ?? ""}\n${descricao}`, a.titulo) : null;
     const repetido = av.oportunidade && !exclusao ? await mesmaOportunidade(db, b.id, a) : null;
     if (exclusao) {
       av.oportunidade = false;
