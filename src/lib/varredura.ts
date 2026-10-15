@@ -10,6 +10,8 @@ type Bairro = Database["public"]["Tables"]["radar_bairros"]["Row"];
 
 /** Pausa entre uma requisição e outra ao mesmo portal — não martelar. */
 const PAUSA_MS = 1500;
+/** Descrições abertas ao mesmo tempo, por portal (a fonte pode pedir menos). */
+const DESCRICOES_EM_PARALELO = 4;
 
 const dorme = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -108,7 +110,7 @@ async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[]
     novos.push(...ineditos);
     // portal ordenado por data: página com anúncio conhecido marca onde parou a última vez
     if (!aprendendo && f.ordenadoPorRecentes && ineditos.length < lote.length) break;
-    await dorme(PAUSA_MS);
+    await dorme(f.pausaMs ?? PAUSA_MS);
   }
 
   const doTipo = novos.filter((a) => !a.tipo || b.tipos.includes(a.tipo));
@@ -154,16 +156,26 @@ async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[]
 
   // 2. analisa cada novo: R$/m² contra a referência + palavras na descrição
   const ref = await medias(db, b.id);
+  // descrições em paralelo (o proxy rotativo dá um IP por requisição): 126 anúncios novos
+  // levavam ~10 min um a um (15/10/26)
+  const descricoes = new Map<string, string>();
+  const paralelo = f.descricoesEmParalelo ?? DESCRICOES_EM_PARALELO;
+  for (let i = 0; i < doTipo.length; i += paralelo) {
+    await Promise.all(
+      doTipo.slice(i, i + paralelo).map(async (a) => {
+        try {
+          descricoes.set(a.id, await f.buscarDescricao(a.url));
+        } catch (err) {
+          await logEvent("warn", "não consegui ler a descrição", { id: a.id, error: String(err) });
+        }
+      })
+    );
+    await dorme(f.pausaMs ?? PAUSA_MS);
+  }
+
   let oportunidades = 0;
   for (const a of doTipo) {
-    let descricao = "";
-    try {
-      descricao = await f.buscarDescricao(a.url);
-    } catch (err) {
-      await logEvent("warn", "não consegui ler a descrição", { id: a.id, error: String(err) });
-    }
-    await dorme(PAUSA_MS);
-
+    const descricao = descricoes.get(a.id) ?? "";
     const m2 = precoM2(a);
     const palavras = palavrasEncontradas(`${a.titulo}\n${descricao}`, termos);
     const av = avaliar({

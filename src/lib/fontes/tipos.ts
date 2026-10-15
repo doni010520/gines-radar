@@ -50,4 +50,8 @@ export interface Fonte {
   paginasAprendizado: number;
   /** buscas seguintes: máximo de páginas pra achar o que é novo */
   paginasNovos: number;
+  /** pausa entre requisições ao portal (padrão 1,5 s); respeita o Crawl-delay do robots.txt */
+  pausaMs?: number;
+  /** descrições abertas ao mesmo tempo (padrão 4); 1 = uma por vez */
+  descricoesEmParalelo?: number;
 }

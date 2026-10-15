@@ -1,11 +1,23 @@
 /**
- * Fontes ativas do radar, na ordem em que a busca percorre. Portal novo: criar o arquivo
- * implementando Fonte (./tipos.ts) e incluir aqui.
+ * Fontes ativas do radar, na ordem em que a busca percorre (prioridade do Gines, 14/10/26).
+ * Portal novo: criar o arquivo implementando Fonte (./tipos.ts) e incluir aqui.
+ *
+ * Fora da lista de propósito:
+ * - VivaReal: mesmo banco de anúncios do ZAP (mesmos ids e totais) — já coberto.
+ * - Wimóveis: mesmo banco do Imovelweb (58 de 59 ids iguais na Asa Sul) — já coberto.
+ * - OLX, Mercado Livre: exigem navegador de verdade (desafio anti-robô); Facebook exige login.
+ * - Caixa / leilões / bancos: critério de exclusão do Gines.
  */
 import type { Fonte } from "./tipos";
 import { zap } from "./zap";
+import { proprietariodireto } from "./proprietariodireto";
+import { casamineira, imovelweb } from "./navent";
+import { chavesnamao } from "./chavesnamao";
+import { quintoandar } from "./quintoandar";
+import { spimovel } from "./spimovel";
+import { loft } from "./loft";
 
-export const FONTES: Fonte[] = [zap];
+export const FONTES: Fonte[] = [zap, proprietariodireto, imovelweb, chavesnamao, quintoandar, spimovel, loft, casamineira];
 
 export function fontePorPortal(portal: string): Fonte | undefined {
   return FONTES.find((f) => f.portal === portal);
