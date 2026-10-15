@@ -19,7 +19,7 @@ WORKDIR /app
 # o radar baixa os portais via curl (a Cloudflare do ZAP bloqueia a assinatura TLS do Node)
 # OLX e Mercado Livre só abrem num navegador de verdade e "visível" (headless toma 403):
 # Chromium + tela virtual (Xvfb). playwright-core só controla o Chromium do sistema.
-RUN apk add --no-cache curl chromium xvfb-run font-noto
+RUN apk add --no-cache curl chromium xvfb font-noto
 ENV CHROME_PATH=/usr/bin/chromium-browser
 ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
@@ -33,5 +33,6 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# a tela virtual existe enquanto o servidor roda; o navegador só abre durante uma busca
-CMD ["xvfb-run", "-a", "--server-args=-screen 0 1366x900x24", "node", "server.js"]
+# a tela virtual (Xvfb) é aberta pelo próprio radar só quando o navegador é usado
+# (src/lib/fontes/navegador.ts) — se ela falhar, só OLX/Mercado Livre ficam de fora
+CMD ["node", "server.js"]

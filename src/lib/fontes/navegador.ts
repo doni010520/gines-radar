@@ -40,6 +40,30 @@ async function servidorDoProxy(): Promise<{ server: string; username?: string; p
   };
 }
 
+let telaVirtual: Promise<string | undefined> | null = null;
+
+/**
+ * No servidor (Linux sem monitor) o Chrome "visível" precisa de uma tela: sobe um Xvfb na
+ * primeira vez e devolve o DISPLAY. Fica de pé enquanto o processo vive (é leve, ~10 MB).
+ */
+function display(): Promise<string | undefined> {
+  if (process.platform !== "linux" || process.env.DISPLAY) return Promise.resolve(process.env.DISPLAY);
+  if (!telaVirtual) {
+    telaVirtual = (async () => {
+      const { spawn } = await import("node:child_process");
+      const tela = ":99";
+      const xvfb = spawn("Xvfb", [tela, "-screen", "0", "1366x900x24", "-nolisten", "tcp"], { stdio: "ignore", detached: true });
+      xvfb.unref();
+      xvfb.on("exit", () => {
+        telaVirtual = null; // morreu: a próxima busca tenta subir de novo
+      });
+      await new Promise((r) => setTimeout(r, 1500));
+      return tela;
+    })();
+  }
+  return telaVirtual;
+}
+
 const navegadores = new Map<"direto" | "proxy", Promise<Browser>>();
 
 async function navegador(saida: "direto" | "proxy"): Promise<Browser> {
@@ -48,9 +72,11 @@ async function navegador(saida: "direto" | "proxy"): Promise<Browser> {
     b = (async () => {
       const { chromium } = await import("playwright-core");
       const proxy = saida === "proxy" ? await servidorDoProxy() : null;
+      const tela = await display();
       return chromium.launch({
         executablePath: caminhoDoChrome(),
         headless: false,
+        env: { ...process.env, ...(tela ? { DISPLAY: tela } : {}) },
         proxy: proxy ?? undefined,
         args: [
           "--disable-blink-features=AutomationControlled",
