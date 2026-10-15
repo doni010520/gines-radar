@@ -87,6 +87,8 @@ async function navegador(saida: "direto" | "proxy"): Promise<Browser> {
         ],
       });
     })();
+    // falhou ao abrir: não guarda a falha, a próxima chamada tenta de novo
+    b.catch(() => navegadores.delete(saida));
     navegadores.set(saida, b);
   }
   return b;
@@ -161,15 +163,24 @@ export async function abrirPagina(
   const site = new URL(url).host;
   const temProxy = !!process.env.RADAR_PROXY;
   if (!temProxy || !sitesComProxy.has(site)) {
-    const r = await abrirUmaVez("direto", url, o).catch(() => null);
+    let erro = "";
+    const r = await abrirUmaVez("direto", url, o).catch((e) => {
+      erro = String(e);
+      return null;
+    });
+    if (!r && !temProxy) throw new Error(`não consegui abrir ${site}: ${erro.slice(0, 300)}`);
     if (r && (!temProxy || !bloqueado(r.status, r.html))) return r;
     if (r) sitesComProxy.add(site);
   }
   let ultimo: PaginaAberta | null = null;
+  let erroProxy = "";
   for (let t = 0; t < 2; t++) {
-    ultimo = await abrirUmaVez("proxy", url, o).catch(() => null);
+    ultimo = await abrirUmaVez("proxy", url, o).catch((e) => {
+      erroProxy = String(e);
+      return null;
+    });
     if (ultimo && !bloqueado(ultimo.status, ultimo.html)) return ultimo;
   }
   if (ultimo) return ultimo;
-  throw new Error(`não consegui abrir ${site} nem pelo proxy`);
+  throw new Error(`não consegui abrir ${site} nem pelo proxy: ${erroProxy.replace(/(\/\/[^:\s/]+:)[^@\s]+@/g, "$1***@").slice(0, 300)}`);
 }
