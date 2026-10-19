@@ -105,23 +105,45 @@ export type PaginaAberta = { status: number; html: string; url: string };
 
 const sitesComProxy = new Set<string>();
 
-function bloqueado(status: number, html: string): boolean {
+/**
+ * Bloqueio de robô: 403/429, página curta de desafio (Cloudflare, CAPTCHA) ou desvio pra tela
+ * de verificação (Mercado Livre manda o IP da VPS pra /gz/account-verification, 19/10/26).
+ */
+function bloqueado(status: number, html: string, url = ""): boolean {
   if (status === 403 || status === 429) return true;
-  return html.length < 60_000 && /cf-chl|challenge-platform|attention required|just a moment|bot_challenge|captcha/i.test(html);
+  if (/account-verification|suspicious-traffic/i.test(url)) return true;
+  return html.length < 60_000 && /cf-chl|challenge-platform|attention required|just a moment|bot_challenge|captcha|suspicious-traffic/i.test(html);
 }
+
+/**
+ * Rastreamento e anúncio de terceiros: não trazem dado de imóvel e pesam no proxy (a página da
+ * OLX vinha com 2,4 MB pelo proxy). O desafio da Cloudflare (challenges.cloudflare.com) passa.
+ */
+const TERCEIROS =
+  /google-analytics|googletagmanager|googlesyndication|googleadservices|doubleclick|facebook\.(net|com)|hotjar|clarity\.ms|criteo|taboola|outbrain|adsystem|amazon-adsystem|tiktok|bing\.com|licdn|pinterest|hubspot|segment\.(io|com)|newrelic|nr-data|sentry|datadoghq|branch\.io|onesignal|appsflyer|adnxs|rubiconproject|pubmatic|smartadserver|scorecardresearch|quantserve|braze/i;
 
 async function abrirUmaVez(
   saida: "direto" | "proxy",
   url: string,
-  opts: { esperarMs: number; esperarSeletor?: string; aoAbrir?: (p: Page) => Promise<void> }
+  opts: { esperarMs: number; esperarSeletor?: string; bloquearScripts?: boolean; aoAbrir?: (p: Page) => Promise<void> }
 ): Promise<PaginaAberta> {
   const b = await navegador(saida);
   const ctx: BrowserContext = await b.newContext({ locale: "pt-BR", viewport: { width: 1366, height: 900 } });
   try {
     const page = await ctx.newPage();
     await page.route("**/*", (r) => {
-      const tipo = r.request().resourceType();
-      return tipo === "image" || tipo === "font" || tipo === "media" ? r.abort() : r.continue();
+      const req = r.request();
+      const tipo = req.resourceType();
+      const descartavel =
+        tipo === "image" ||
+        tipo === "font" ||
+        tipo === "media" ||
+        tipo === "stylesheet" ||
+        TERCEIROS.test(req.url()) ||
+        // OLX: os anúncios já vêm no HTML; sem os scripts dela a página cai de 2,4 MB pra ~80 KB.
+        // O desafio da Cloudflare continua passando (challenges.cloudflare.com / cdn-cgi).
+        (opts.bloquearScripts === true && tipo === "script" && !/challenges\.cloudflare\.com|\/cdn-cgi\//.test(req.url()));
+      return descartavel ? r.abort() : r.continue();
     });
     page.on("requestfinished", async (req) => {
       try {
@@ -137,10 +159,10 @@ async function abrirUmaVez(
     const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
     let status = resp?.status() ?? 0;
     // desafio anti-robô (Mercado Livre): o navegador resolve sozinho e recarrega — espera
-    if (bloqueado(status, await page.content())) {
+    if (bloqueado(status, await page.content(), page.url())) {
       await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
       await page.waitForTimeout(5_000);
-      if (!bloqueado(200, await page.content())) status = 200;
+      if (!bloqueado(200, await page.content(), page.url())) status = 200;
     }
     if (opts.esperarSeletor) await page.waitForSelector(opts.esperarSeletor, { timeout: opts.esperarMs }).catch(() => {});
     else await page.waitForTimeout(opts.esperarMs);
@@ -157,9 +179,15 @@ async function abrirUmaVez(
  */
 export async function abrirPagina(
   url: string,
-  opts: { esperarMs?: number; esperarSeletor?: string; aoAbrir?: (p: Page) => Promise<void> } = {}
+  opts: {
+    esperarMs?: number;
+    esperarSeletor?: string;
+    /** não baixa os scripts do próprio site (só quando os dados já vêm no HTML) */
+    bloquearScripts?: boolean;
+    aoAbrir?: (p: Page) => Promise<void>;
+  } = {}
 ): Promise<PaginaAberta> {
-  const o = { esperarMs: opts.esperarMs ?? 4_000, esperarSeletor: opts.esperarSeletor, aoAbrir: opts.aoAbrir };
+  const o = { esperarMs: opts.esperarMs ?? 4_000, esperarSeletor: opts.esperarSeletor, bloquearScripts: opts.bloquearScripts, aoAbrir: opts.aoAbrir };
   const site = new URL(url).host;
   const temProxy = !!process.env.RADAR_PROXY;
   if (!temProxy || !sitesComProxy.has(site)) {
@@ -169,7 +197,7 @@ export async function abrirPagina(
       return null;
     });
     if (!r && !temProxy) throw new Error(`não consegui abrir ${site}: ${erro.slice(0, 300)}`);
-    if (r && (!temProxy || !bloqueado(r.status, r.html))) return r;
+    if (r && (!temProxy || !bloqueado(r.status, r.html, r.url))) return r;
     if (r) sitesComProxy.add(site);
   }
   let ultimo: PaginaAberta | null = null;
@@ -179,7 +207,7 @@ export async function abrirPagina(
       erroProxy = String(e);
       return null;
     });
-    if (ultimo && !bloqueado(ultimo.status, ultimo.html)) return ultimo;
+    if (ultimo && !bloqueado(ultimo.status, ultimo.html, ultimo.url)) return ultimo;
   }
   if (ultimo) return ultimo;
   throw new Error(`não consegui abrir ${site} nem pelo proxy: ${erroProxy.replace(/(\/\/[^:\s/]+:)[^@\s]+@/g, "$1***@").slice(0, 300)}`);
