@@ -5,11 +5,12 @@
  * Fora da lista de propósito:
  * - VivaReal: mesmo banco de anúncios do ZAP (mesmos ids e totais) — já coberto.
  * - Wimóveis: mesmo banco do Imovelweb (58 de 59 ids iguais na Asa Sul) — já coberto.
- * - OLX, Mercado Livre: exigem navegador de verdade (desafio anti-robô); Facebook exige login.
+ * - Mercado Livre: ainda em construção (navegador de verdade). Facebook: exige login numa conta.
  * - Caixa / leilões / bancos: critério de exclusão do Gines.
  */
 import type { Fonte } from "./tipos";
 import { zap } from "./zap";
+import { olx } from "./olx";
 import { proprietariodireto } from "./proprietariodireto";
 import { casamineira, imovelweb } from "./navent";
 import { chavesnamao } from "./chavesnamao";
@@ -17,7 +18,7 @@ import { quintoandar } from "./quintoandar";
 import { spimovel } from "./spimovel";
 import { loft } from "./loft";
 
-export const FONTES: Fonte[] = [zap, proprietariodireto, imovelweb, chavesnamao, quintoandar, spimovel, loft, casamineira];
+export const FONTES: Fonte[] = [olx, zap, proprietariodireto, imovelweb, chavesnamao, quintoandar, spimovel, loft, casamineira];
 
 export function fontePorPortal(portal: string): Fonte | undefined {
   return FONTES.find((f) => f.portal === portal);
