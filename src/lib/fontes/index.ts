@@ -5,7 +5,8 @@
  * Fora da lista de propósito:
  * - VivaReal: mesmo banco de anúncios do ZAP (mesmos ids e totais) — já coberto.
  * - Wimóveis: mesmo banco do Imovelweb (58 de 59 ids iguais na Asa Sul) — já coberto.
- * - Mercado Livre: ainda em construção (navegador de verdade). Facebook: exige login numa conta.
+ * - Mercado Livre: reCAPTCHA de clicar até em IP residencial (19/10) e quase sem imóvel
+ *   (Pinheiros 3, Salvador 1). Facebook: exige login numa conta.
  * - Caixa / leilões / bancos: critério de exclusão do Gines.
  */
 import type { Fonte } from "./tipos";

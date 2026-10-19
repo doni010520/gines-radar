@@ -110,10 +110,10 @@ async function testarAnuncio(url: string) {
  * Cada fonte a partir do servidor: 1ª página do bairro + 1 descrição. Mostra quais sites
  * passaram direto e quais precisaram do proxy, e quanto cada saída gastou. Não grava nada.
  */
-async function testarFontes(bairro: string, cidade: string, estado: string) {
+async function testarFontes(bairro: string, cidade: string, estado: string, so: string | null) {
   const b = { nome: bairro, zona: "", cidade, estado };
   const out: Record<string, unknown> = {};
-  for (const f of FONTES) {
+  for (const f of FONTES.filter((x) => !so || x.portal === so)) {
     const antes = { proxy: consumo.proxy.bytes, direto: consumo.direto.bytes };
     const t0 = Date.now();
     try {
@@ -163,7 +163,7 @@ export async function GET(req: NextRequest) {
     }
   }
   if (sp.get("fontes")) {
-    return NextResponse.json(await testarFontes(sp.get("bairro") || "Vila Madalena", sp.get("cidade") || "São Paulo", sp.get("estado") || "São Paulo"));
+    return NextResponse.json(await testarFontes(sp.get("bairro") || "Vila Madalena", sp.get("cidade") || "São Paulo", sp.get("estado") || "São Paulo", sp.get("so")));
   }
   const anuncio = sp.get("anuncio");
   if (anuncio) return NextResponse.json(await testarAnuncio(anuncio));

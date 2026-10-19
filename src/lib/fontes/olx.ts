@@ -8,7 +8,8 @@
  * Bairro → URL: o caminho tem um segmento de região que não sai do nome
  * (estado-ba/grande-salvador/salvador/pituba, estado-sp/sao-paulo-e-regiao/zona-oeste/pinheiros).
  * Vem do autocompletar de localização que o próprio site usa
- * (location-autocomplete.olx.com.br/v2/location?q=...) — esse endpoint aceita curl (baixar()).
+ * (location-autocomplete.olx.com.br/v2/location?q=...) — curl primeiro; do servidor ele barra
+ * curl, aí a consulta é feita de dentro de uma página da OLX no navegador.
  * Só servem resultados de bairro (filters.sd_id) com o mesmo nome, a mesma UF e a cidade certa
  * (no subtítulo "Em Salvador, ..." ou, nas capitais divididas em zonas, a região
  * "sao-paulo-e-regiao"). O caminho resolvido fica em memória por bairro.
@@ -72,9 +73,25 @@ async function autocompletar(q: string): Promise<LocalBruto[]> {
     Origin: BASE,
     Referer: `${BASE}/`,
   });
-  if (res.status !== 200) throw new Error(`OLX localização ${res.status}: ${res.corpo.slice(0, 200)}`);
-  const j = JSON.parse(res.corpo) as unknown;
-  return Array.isArray(j) ? (j as LocalBruto[]) : [];
+  if (res.status === 200) {
+    const j = JSON.parse(res.corpo) as unknown;
+    return Array.isArray(j) ? (j as LocalBruto[]) : [];
+  }
+  // do servidor o endpoint barra curl até pelo proxy (403, 19/10/26): pergunta de dentro de uma
+  // página da OLX aberta no navegador, como o próprio site faz
+  let lista: unknown = null;
+  await abrirPagina(`${BASE}/`, {
+    esperarMs: 500,
+    bloquearScripts: true,
+    aoAbrir: async (p) => {
+      lista = await p.evaluate(async (endereco) => {
+        const r = await fetch(endereco, { headers: { Accept: "application/json" } });
+        return r.ok ? r.json() : null;
+      }, `https://location-autocomplete.olx.com.br/v2/location?q=${encodeURIComponent(q)}`);
+    },
+  });
+  if (!Array.isArray(lista)) throw new Error(`OLX localização ${res.status} (curl) e sem resposta pelo navegador`);
+  return lista as LocalBruto[];
 }
 
 /** 2 = cidade no subtítulo ("Em Salvador, DDD 71"); 1 = capital com zonas ("sao-paulo-e-regiao/zona-oeste"). */
