@@ -103,7 +103,10 @@ function nota(l: LocalBruto, b: BairroBusca): number {
   const emCidade = /^Em ([^,]+),/.exec(l.subtitle ?? "")?.[1];
   if (emCidade && slug(emCidade) === cidade) return 2;
   const seg = l.path.split("/");
-  if (seg.length >= 4 && seg[1] === `${cidade}-e-regiao`) return 1;
+  // capital dividida em zonas: "sao-paulo-e-regiao/zona-oeste/vila-madalena". Só vale se o
+  // segmento for mesmo uma zona — "Vila Madalena" também existe em São Bernardo do Campo, que
+  // fica na mesma região "sao-paulo-e-regiao" (19/10/26)
+  if (seg.length >= 4 && seg[1] === `${cidade}-e-regiao` && seg[2].startsWith("zona-")) return 1;
   return 0;
 }
 
