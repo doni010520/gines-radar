@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/service";
-import { ESTADOS } from "@/lib/estados";
+import { ESTADOS, nomeProprio } from "@/lib/estados";
 
 /**
  * Ações do link sem login. Cada uma confere o segredo do link (RADAR_SHARE_TOKEN) antes de
@@ -27,9 +27,9 @@ function numeroOuNulo(f: FormData, k: string): number | null {
 export async function salvarBairro(token: string, formData: FormData) {
   const db = validar(token);
   const id = texto(formData, "id");
-  const nome = texto(formData, "nome");
+  const nome = nomeProprio(texto(formData, "nome"));
   if (!nome) throw new Error("Informe o nome do bairro");
-  const cidade = texto(formData, "cidade");
+  const cidade = nomeProprio(texto(formData, "cidade"));
   const estado = texto(formData, "estado");
   if (!cidade) throw new Error("Informe a cidade");
   if (!ESTADOS.some(([n]) => n === estado)) throw new Error("Escolha o estado");

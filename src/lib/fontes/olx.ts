@@ -79,17 +79,30 @@ async function autocompletar(q: string): Promise<LocalBruto[]> {
   }
   // do servidor o endpoint barra curl até pelo proxy (403, 19/10/26): pergunta de dentro de uma
   // página da OLX aberta no navegador, como o próprio site faz
+  const endereco = `https://location-autocomplete.olx.com.br/v2/location?q=${encodeURIComponent(q)}`;
   let lista: unknown = null;
   await abrirPagina(`${BASE}/`, {
     esperarMs: 500,
     bloquearScripts: true,
     aoAbrir: async (p) => {
-      lista = await p.evaluate(async (endereco) => {
-        const r = await fetch(endereco, { headers: { Accept: "application/json" } });
-        return r.ok ? r.json() : null;
-      }, `https://location-autocomplete.olx.com.br/v2/location?q=${encodeURIComponent(q)}`);
+      lista = await p
+        .evaluate(async (e) => {
+          const r = await fetch(e, { headers: { Accept: "application/json" } });
+          return r.ok ? r.json() : null;
+        }, endereco)
+        .catch(() => null); // "Failed to fetch" pelo proxy (22/10/26) — tenta abrindo direto abaixo
     },
   });
+  if (!Array.isArray(lista)) {
+    // abre o próprio endereço do autocompletar no navegador: o corpo da página é o JSON
+    const pagina = await abrirPagina(endereco, { esperarMs: 300, bloquearScripts: true });
+    const json = /<pre[^>]*>([\s\S]*?)<\/pre>/.exec(pagina.html)?.[1] ?? pagina.html.replace(/<[^>]+>/g, "");
+    try {
+      lista = JSON.parse(json.replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
+    } catch {
+      lista = null;
+    }
+  }
   if (!Array.isArray(lista)) throw new Error(`OLX localização ${res.status} (curl) e sem resposta pelo navegador`);
   return lista as LocalBruto[];
 }

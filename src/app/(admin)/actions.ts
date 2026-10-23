@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { nomeProprio } from "@/lib/estados";
 
 async function autenticado() {
   const supabase = await createSupabaseServerClient();
@@ -27,7 +28,7 @@ function numeroOuNulo(f: FormData, k: string): number | null {
 export async function salvarBairro(formData: FormData) {
   const supabase = await autenticado();
   const id = texto(formData, "id");
-  const nome = texto(formData, "nome");
+  const nome = nomeProprio(texto(formData, "nome"));
   if (!nome) throw new Error("Informe o nome do bairro");
   const pct = numeroOuNulo(formData, "pct_abaixo_media") ?? 40;
   if (pct >= 95) throw new Error("% abaixo da média precisa ser menor que 95");
