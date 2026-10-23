@@ -273,6 +273,62 @@ async function varrerVariante(
   return { novos: doTipo.length, oportunidades };
 }
 
+/**
+ * Anúncio que entrou quando o bairro ainda não tinha média pro tipo dele (ou com média
+ * diferente) nunca era reavaliado — em Moema, casas 66% abaixo ficaram de fora (23/10/26).
+ * Ao fim de cada busca, confere de novo pelo preço quem ainda não é oportunidade. Só banco,
+ * sem abrir portal.
+ */
+async function reavaliarAntigos(db: Db, b: Bairro): Promise<number> {
+  const ref = await medias(db, b.id);
+  let marcadas = 0;
+  for (let de = 0; ; de += 1000) {
+    const { data } = await db
+      .from("radar_anuncios")
+      .select("id,tipo,titulo,anunciante,descricao,preco,area,preco_m2,motivo")
+      .eq("bairro_id", b.id)
+      .eq("oportunidade", false)
+      .eq("descartado", false)
+      .not("preco_m2", "is", null)
+      .order("id")
+      .range(de, de + 999);
+    for (const a of data ?? []) {
+      if (!a.tipo || !b.tipos.includes(a.tipo)) continue;
+      // decisão já tomada por outro motivo (leilão, repetido) não é desfeita aqui
+      if (a.motivo?.startsWith("excluído") || a.motivo?.startsWith("mesmo imóvel")) continue;
+      const anuncio = {
+        id: a.id,
+        tipo: a.tipo,
+        titulo: a.titulo ?? "",
+        url: "",
+        preco: a.preco === null ? null : Number(a.preco),
+        area: a.area === null ? null : Number(a.area),
+        anunciante: a.anunciante,
+        criadoNoPortal: null,
+      };
+      const av = avaliar({
+        precoM2: Number(a.preco_m2),
+        tetoM2: b.teto_m2 ? Number(b.teto_m2) : null,
+        pctAbaixoMedia: Number(b.pct_abaixo_media),
+        mediaM2: referenciaDe(ref, anuncio.tipo, anuncio.area),
+        palavras: [],
+      });
+      if (!av.oportunidade) continue;
+      const exclusao = motivoExclusao(`${anuncio.titulo}\n${a.anunciante ?? ""}\n${a.descricao ?? ""}`, anuncio.titulo);
+      const repetido = exclusao ? null : await mesmaOportunidade(db, b.id, anuncio);
+      const motivo = exclusao ? `excluído: ${exclusao}` : repetido ? `mesmo imóvel de ${repetido} (outro anúncio)` : av.motivo;
+      await db
+        .from("radar_anuncios")
+        .update({ oportunidade: !exclusao && !repetido, motivo, pct_abaixo: av.pctAbaixo })
+        .eq("id", a.id);
+      if (!exclusao && !repetido) marcadas++;
+    }
+    if (!data || data.length < 1000) break;
+  }
+  if (marcadas) await logEvent("info", "anúncios antigos viraram oportunidade", { bairro: b.nome, marcadas });
+  return marcadas;
+}
+
 let rodando = false;
 
 /**
@@ -322,6 +378,7 @@ export async function rodarVarredura(
       }
       if (algumPortalOk) {
         total.bairros++;
+        total.oportunidades += await reavaliarAntigos(db, b);
         const agora = new Date().toISOString();
         await db
           .from("radar_bairros")
