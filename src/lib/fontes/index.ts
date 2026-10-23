@@ -31,4 +31,4 @@ export function nomeDoPortal(portal: string | null | undefined): string {
   return fontePorPortal(portal)?.nome ?? portal;
 }
 
-export type { Anuncio, BairroBusca, Fonte } from "./tipos";
+export type { Anuncio, BairroBusca, Fonte, Variante } from "./tipos";

@@ -29,6 +29,13 @@ export type Anuncio = {
   criadoNoPortal: string | null; // ISO, se o portal informar
 };
 
+/**
+ * Recorte de uma busca dentro do portal (ex.: só casas). Sem isso o radar lê os anúncios mais
+ * novos de todos os tipos e descarta o que não interessa — num bairro de prédio, as casas quase
+ * não aparecem (Moema: 111 casas no ZAP, o radar via 7 — 23/10/26).
+ */
+export type Variante = { chave: string; tipos: string[] };
+
 export interface Fonte {
   /** chave curta gravada em radar_anuncios.portal e prefixo do id ("zap") */
   portal: string;
@@ -38,7 +45,12 @@ export interface Fonte {
    * Página `pagina` (0, 1, 2...) de anúncios de venda do bairro. Lista vazia = acabou.
    * Se `ordenadoPorRecentes`, do mais novo pro mais antigo.
    */
-  buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]>;
+  buscarPagina(b: BairroBusca, pagina: number, variante?: Variante): Promise<Anuncio[]>;
+  /**
+   * Opcional: recortes da busca pros tipos marcados no bairro, quando o portal filtra tipo no
+   * servidor. Cada variante é lida e aprende a média separadamente (ver Variante).
+   */
+  variantes?(tiposDoBairro: string[]): Variante[];
   /** Descrição completa do anúncio (onde aparecem "precisa de reforma", "inventário"...). */
   buscarDescricao(url: string): Promise<string>;
   /**

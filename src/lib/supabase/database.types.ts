@@ -626,6 +626,7 @@ export type Database = {
       radar_bairros: {
         Row: {
           aprendido_em: string | null
+          aprendido_variantes: string[]
           ativo: boolean
           cidade: string
           created_at: string
@@ -640,6 +641,7 @@ export type Database = {
         }
         Insert: {
           aprendido_em?: string | null
+          aprendido_variantes?: string[]
           ativo?: boolean
           cidade?: string
           created_at?: string
@@ -654,6 +656,7 @@ export type Database = {
         }
         Update: {
           aprendido_em?: string | null
+          aprendido_variantes?: string[]
           ativo?: boolean
           cidade?: string
           created_at?: string

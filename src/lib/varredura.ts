@@ -1,6 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Database } from "@/lib/supabase/database.types";
-import { FONTES, type Anuncio, type Fonte } from "./fontes";
+import { FONTES, type Anuncio, type Fonte, type Variante } from "./fontes";
 import { consumo } from "./fontes/http";
 import { fecharNavegadores } from "./fontes/navegador";
 import { avaliar, calcularReferencias, motivoExclusao, palavrasEncontradas, referenciaDe, type Referencias } from "./analise";
@@ -109,26 +109,45 @@ function precisaDescricao(a: Anuncio, b: Bairro, ref: Referencias, termos: strin
   return (1 - m2 / media) * 100 >= Number(b.pct_abaixo_media) - MARGEM_DESCRICAO;
 }
 
-/** 1ª busca desse bairro nesse portal = ainda não há nenhum anúncio dele gravado. */
-async function aprendendoNoPortal(db: Db, bairroId: string, portal: string): Promise<boolean> {
-  const { count } = await db
-    .from("radar_anuncios")
-    .select("id", { count: "exact", head: true })
-    .eq("bairro_id", bairroId)
-    .eq("portal", portal);
-  return !count;
+/**
+ * Um bairro num portal: uma passada por variante (o ZAP busca casa, apartamento, terreno...
+ * separados); portal sem variantes faz uma passada só. Cada variante aprende a média uma vez —
+ * fica registrada em radar_bairros.aprendido_variantes como "<portal>:<variante>".
+ */
+async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[], alertaNumero: string | null) {
+  const lista: (Variante | undefined)[] = f.variantes ? f.variantes(b.tipos) : [undefined];
+  const total = { novos: 0, oportunidades: 0 };
+  for (const v of lista) {
+    const marca = `${f.portal}:${v?.chave ?? "*"}`;
+    const aprendendo = !b.aprendido_variantes.includes(marca);
+    const r = await varrerVariante(db, b, f, v, aprendendo, termos, alertaNumero);
+    total.novos += r.novos;
+    total.oportunidades += r.oportunidades;
+    if (aprendendo) {
+      b.aprendido_variantes = [...b.aprendido_variantes, marca];
+      await db.from("radar_bairros").update({ aprendido_variantes: b.aprendido_variantes }).eq("id", b.id);
+    }
+  }
+  return total;
 }
 
-async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[], alertaNumero: string | null) {
+async function varrerVariante(
+  db: Db,
+  b: Bairro,
+  f: Fonte,
+  variante: Variante | undefined,
+  aprendendo: boolean,
+  termos: string[],
+  alertaNumero: string | null
+) {
   const busca = { nome: b.nome, zona: b.zona, cidade: b.cidade, estado: b.estado };
-  const aprendendo = await aprendendoNoPortal(db, b.id, f.portal);
   const paginas = aprendendo ? f.paginasAprendizado : f.paginasNovos;
 
   // 1. coleta os anúncios ainda não vistos
   const novos: Anuncio[] = [];
   const nestaBusca = new Set<string>(); // portal que repete anúncio entre páginas
   for (let p = 0; p < paginas; p++) {
-    const lote = (await f.buscarPagina(busca, p)).filter((a) => !nestaBusca.has(a.id));
+    const lote = (await f.buscarPagina(busca, p, variante)).filter((a) => !nestaBusca.has(a.id));
     if (lote.length === 0) break;
     lote.forEach((a) => nestaBusca.add(a.id));
     const { data: conhecidos } = await db.from("radar_anuncios").select("id").in("id", lote.map((a) => a.id));
@@ -178,7 +197,13 @@ async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[]
       oportunidadesIniciais++;
       await db.from("radar_anuncios").update({ oportunidade: true, motivo: av.motivo, pct_abaixo: av.pctAbaixo }).eq("id", a.id);
     }
-    await logEvent("info", "bairro aprendido", { bairro: b.nome, portal: f.portal, anuncios: doTipo.length, oportunidades: oportunidadesIniciais });
+    await logEvent("info", "bairro aprendido", {
+      bairro: b.nome,
+      portal: f.portal,
+      variante: variante?.chave ?? null,
+      anuncios: doTipo.length,
+      oportunidades: oportunidadesIniciais,
+    });
     return { novos: doTipo.length, oportunidades: oportunidadesIniciais };
   }
 

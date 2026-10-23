@@ -10,7 +10,7 @@
  * radar_logs com a resposta crua pra ajustar.
  */
 import { baixar, HEADERS_NAVEGADOR, textoDoHtml, UA } from "./http";
-import type { Anuncio, BairroBusca, Fonte } from "./tipos";
+import type { Anuncio, BairroBusca, Fonte, Variante } from "./tipos";
 
 const HEADERS_API = {
   "User-Agent": UA,
@@ -23,11 +23,36 @@ const HEADERS_API = {
 /** Máximo do ZAP: 30 por página (acima disso responde 400). */
 const TAMANHO = 30;
 
+/**
+ * Filtro de tipo do ZAP: só funciona com a combinação completa (unitTypes + unitTypesV3 +
+ * unitSubTypes + usageTypes) e um grupo por vez — pedindo dois, ele aplica só o primeiro
+ * (testado em 23/10/26). Cada grupo vira uma variante da busca.
+ */
+const GRUPOS_ZAP: { chave: string; tipos: string[]; filtro: Record<string, string> }[] = [
+  // "casas" inclui sobrado (vem como HOME com subtipo TWO_STORY_HOUSE)
+  { chave: "casa", tipos: ["HOME", "TWO_STORY_HOUSE"], filtro: { unitTypes: "HOME", unitTypesV3: "HOME", unitSubTypes: "UnitSubType_NONE,SINGLE_STOREY_HOUSE,KITNET" } },
+  { chave: "condominio", tipos: ["CONDOMINIUM"], filtro: { unitTypes: "HOME", unitTypesV3: "CONDOMINIUM", unitSubTypes: "CONDOMINIUM" } },
+  { chave: "vila", tipos: ["VILLAGE_HOUSE"], filtro: { unitTypes: "HOME", unitTypesV3: "VILLAGE_HOUSE", unitSubTypes: "VILLAGE_HOUSE" } },
+  {
+    chave: "terreno",
+    tipos: ["RESIDENTIAL_ALLOTMENT_LAND"],
+    filtro: { unitTypes: "ALLOTMENT_LAND", unitTypesV3: "RESIDENTIAL_ALLOTMENT_LAND", unitSubTypes: "UnitSubType_NONE,CONDOMINIUM,VILLAGE" },
+  },
+  { chave: "apartamento", tipos: ["APARTMENT"], filtro: { unitTypes: "APARTMENT", unitTypesV3: "APARTMENT", unitSubTypes: "UnitSubType_NONE,DUPLEX,TRIPLEX" } },
+  { chave: "cobertura", tipos: ["PENTHOUSE"], filtro: { unitTypes: "APARTMENT", unitTypesV3: "PENTHOUSE", unitSubTypes: "PENTHOUSE" } },
+];
+
+/** Uma variante por grupo que tenha algum tipo marcado no bairro. */
+function variantes(tiposDoBairro: string[]): Variante[] {
+  return GRUPOS_ZAP.filter((g) => g.tipos.some((t) => tiposDoBairro.includes(t))).map((g) => ({ chave: g.chave, tipos: g.tipos }));
+}
+
 type ListingBruto = {
   listing: {
     id: string;
     createdAt?: string;
     unitTypes?: string[];
+    unitSubTypes?: string[];
     usableAreas?: number[];
     totalAreas?: number[];
     pricingInfos?: { businessType?: string; price?: number | string }[];
@@ -48,7 +73,12 @@ function normalizar(item: ListingBruto): Anuncio {
   const area = primeiroNumero(l.usableAreas) ?? primeiroNumero(l.totalAreas);
   return {
     id: `zap:${l.id}`,
-    tipo: l.unitTypes?.[0] ?? null,
+    // sobrado vem como HOME + subtipo; terreno às vezes como ALLOTMENT_LAND genérico
+    tipo: l.unitSubTypes?.includes("TWO_STORY_HOUSE")
+      ? "TWO_STORY_HOUSE"
+      : l.unitTypes?.[0] === "ALLOTMENT_LAND"
+        ? "RESIDENTIAL_ALLOTMENT_LAND"
+        : (l.unitTypes?.[0] ?? null),
     titulo: item.link?.name ?? "",
     url: item.link?.href ? `https://www.zapimoveis.com.br${item.link.href}` : "",
     preco: primeiroNumero(venda?.price),
@@ -58,8 +88,8 @@ function normalizar(item: ListingBruto): Anuncio {
   };
 }
 
-/** Filtro de tipo na API é ignorado pelo ZAP — quem chama filtra. */
-async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> {
+async function buscarPagina(b: BairroBusca, pagina: number, variante?: Variante): Promise<Anuncio[]> {
+  const grupo = variante ? GRUPOS_ZAP.find((g) => g.chave === variante.chave) : undefined;
   const params = new URLSearchParams({
     business: "SALE",
     listingType: "USED",
@@ -72,6 +102,7 @@ async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> 
     categoryPage: "RESULT",
     portal: "ZAP",
     sort: "createdAt DESC id ASC",
+    ...(grupo ? { usageTypes: "RESIDENTIAL", ...grupo.filtro } : {}),
   });
   const res = await baixar(`https://glue-api.zapimoveis.com.br/v2/listings?${params}`, HEADERS_API);
   if (res.status !== 200) throw new Error(`ZAP busca ${res.status}: ${res.corpo.slice(0, 200)}`);
@@ -91,6 +122,7 @@ export const zap: Fonte = {
   nome: "ZAP",
   buscarPagina,
   buscarDescricao,
+  variantes,
   ordenadoPorRecentes: true,
   paginasAprendizado: 10,
   paginasNovos: 5,
