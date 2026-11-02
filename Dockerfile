@@ -1,9 +1,11 @@
-FROM node:22-alpine AS deps
+# imagem do Node pelo espelho da AWS: o Docker Hub limita downloads por IP e a VPS (vários
+# serviços) estourou o limite em 02/11/26 — 429 Too Many Requests travou o deploy
+FROM public.ecr.aws/docker/library/node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:22-alpine AS builder
+FROM public.ecr.aws/docker/library/node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -14,7 +16,7 @@ ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 RUN npm run build
 
-FROM node:22-alpine AS runner
+FROM public.ecr.aws/docker/library/node:22-alpine AS runner
 WORKDIR /app
 # o radar baixa os portais via curl (a Cloudflare do ZAP bloqueia a assinatura TLS do Node)
 # OLX e Mercado Livre só abrem num navegador de verdade e "visível" (headless toma 403):
