@@ -109,8 +109,10 @@ async function autocompletar(q: string): Promise<LocalBruto[]> {
 
 /** 2 = cidade no subtítulo ("Em Salvador, DDD 71"); 1 = capital com zonas ("sao-paulo-e-regiao/zona-oeste"). */
 function nota(l: LocalBruto, b: BairroBusca): number {
-  if (!l.filters?.sd_id || !l.path) return 0;
-  if ((l.uf ?? "").toUpperCase() !== siglaUf(b.estado).toUpperCase()) return 0;
+  if (!l.path || (l.uf ?? "").toUpperCase() !== siglaUf(b.estado).toUpperCase()) return 0;
+  // cidade inteira: a OLX marca a cidade como "zone" ("Em DDD 19 - Grande Campinas")
+  if (!b.nome) return l.filters?.zone && slug(l.title ?? "") === slug(b.cidade) ? 2 : 0;
+  if (!l.filters?.sd_id) return 0;
   if (slug(l.title ?? "") !== slug(b.nome)) return 0;
   const cidade = slug(b.cidade);
   const emCidade = /^Em ([^,]+),/.exec(l.subtitle ?? "")?.[1];
@@ -124,7 +126,7 @@ function nota(l: LocalBruto, b: BairroBusca): number {
 }
 
 async function resolverCaminho(b: BairroBusca): Promise<string | null> {
-  for (const q of [`${b.nome} ${b.cidade}`, b.nome]) {
+  for (const q of b.nome ? [`${b.nome} ${b.cidade}`, b.nome] : [b.cidade]) {
     const melhor = (await autocompletar(q))
       .map((l) => ({ l, n: nota(l, b) }))
       .filter((x) => x.n > 0)
@@ -273,7 +275,7 @@ async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> 
   const saida: Anuncio[] = [];
   for (const a of brutos) {
     const loc = a.locationDetails;
-    if (loc && (slug(loc.neighbourhood ?? "") !== bairro || slug(loc.municipality ?? "") !== cidade)) continue;
+    if (loc && ((bairro && slug(loc.neighbourhood ?? "") !== bairro) || slug(loc.municipality ?? "") !== cidade)) continue;
     const n = normalizar(a);
     if (ja.has(n.id)) continue;
     ja.add(n.id);

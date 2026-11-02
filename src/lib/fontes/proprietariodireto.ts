@@ -95,17 +95,18 @@ function normalizar(p: ImovelBruto): Anuncio {
 async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> {
   const uf = (siglaUf(b.estado) ?? b.estado).toLowerCase();
   const bairro = slug(b.nome);
-  const url = `${BASE}/venda/imovel/${uf}/${slug(b.cidade)}/${bairro}/direto-com-proprietario?page=${pagina + 1}`;
+  // sem bairro = cidade inteira
+  const url = `${BASE}/venda/imovel/${uf}/${slug(b.cidade)}/${bairro ? `${bairro}/` : ""}direto-com-proprietario?page=${pagina + 1}`;
   const res = await baixar(url, HEADERS_NAVEGADOR);
   if (res.status === 404) return []; // passou da última página
   if (res.status !== 200) throw new Error(`Proprietário Direto busca ${res.status}: ${res.corpo.slice(0, 200)}`);
   const pp = nextData<PaginaBusca>(res.corpo);
   if (!pp) throw new Error(`Proprietário Direto: página sem __NEXT_DATA__: ${res.corpo.slice(0, 200)}`);
   // bairro não reconhecido → o site cai numa busca genérica; não queremos anúncios de outro lugar
-  if (!pp.params?.neighborhood || slug(pp.params.neighborhood) !== bairro) return [];
-  if (pp.params.last_page && pagina + 1 > pp.params.last_page) return [];
+  if (bairro && (!pp.params?.neighborhood || slug(pp.params.neighborhood) !== bairro)) return [];
+  if (pp.params?.last_page && pagina + 1 > pp.params.last_page) return [];
   return (pp.properties ?? [])
-    .filter((p) => !p.neighborhood?.slug || slug(p.neighborhood.slug) === bairro)
+    .filter((p) => !bairro || !p.neighborhood?.slug || slug(p.neighborhood.slug) === bairro)
     .map(normalizar);
 }
 

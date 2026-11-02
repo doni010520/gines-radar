@@ -96,10 +96,11 @@ function listaBairros(cidadeId: string): Promise<ItemId[]> {
 }
 
 /** Ids de cidade e bairro no SP Imóvel; null = o portal não tem esse bairro. */
-async function ids(b: BairroBusca): Promise<{ cidade: string; bairro: string } | null> {
+async function ids(b: BairroBusca): Promise<{ cidade: string; bairro: string | null } | null> {
   if (slug(b.estado) !== "sao-paulo") return null;
   const cidade = (await listaCidades()).find((c) => slug(c.Descricao) === slug(b.cidade));
   if (!cidade) return null;
+  if (!b.nome) return { cidade: cidade.Id, bairro: null }; // cidade inteira
   const bairro = (await listaBairros(cidade.Id)).find((x) => slug(x.Descricao) === slug(b.nome));
   return bairro ? { cidade: cidade.Id, bairro: bairro.Id } : null;
 }
@@ -127,14 +128,15 @@ async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> 
   const id = await ids(b);
   if (!id) return [];
   const filtro =
-    `?FilialId=${FILIAL}&FinalidadeId=1&BairroId=${id.bairro}&BairroIds=${id.bairro}&CidadeIds=${id.cidade}` +
-    `&OrderByOption=13&TirarBairroProximo=True&BairroExato=True&PrioridadeTopo=False`;
+    `?FilialId=${FILIAL}&FinalidadeId=1` +
+    (id.bairro ? `&BairroId=${id.bairro}&BairroIds=${id.bairro}` : "") +
+    `&CidadeIds=${id.cidade}&OrderByOption=13&TirarBairroProximo=True&BairroExato=True&PrioridadeTopo=False`;
   const params = new URLSearchParams({ pageNumber: String(pagina + 1), paramStr: filtro });
   const lista = await json<ImovelBruto[] | "">(`${BASE}/Imovel/JsGetListaImovelPaginacao?${params}`);
   if (!Array.isArray(lista) || !lista.length || !lista[0].RegCount) return [];
   const vistos = new Set<number>();
   return lista
-    .filter((i) => !i.Destaque && !i.SuperDestaque && String(i.BairroId) === id.bairro)
+    .filter((i) => !i.Destaque && !i.SuperDestaque && (!id.bairro || String(i.BairroId) === id.bairro))
     .filter((i) => !vistos.has(i.ImovelId) && vistos.add(i.ImovelId))
     .map(normalizar);
 }

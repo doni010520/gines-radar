@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { nomeBairro } from "@/lib/bairro";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -94,7 +95,11 @@ function CamposBairro({ b }: { b?: BairroForm }) {
           <label htmlFor={`${p}-nome`} className={LABEL}>
             Bairro (como aparece no portal)
           </label>
-          <input id={`${p}-nome`} name="nome" required defaultValue={b?.nome} placeholder="Pinheiros" className={`min-h-11 ${CONTROL}`} />
+          <input id={`${p}-nome`} name="nome" defaultValue={b?.nome} placeholder="Pinheiros" className={`min-h-11 ${CONTROL}`} />
+          <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-ink-muted">
+            <input type="checkbox" name="cidade_inteira" defaultChecked={!!b && !b.nome} className="h-4 w-4 accent-[var(--color-primary)]" />
+            Sem bairro definido (busca a cidade inteira)
+          </label>
         </div>
         <div className="space-y-1.5">
           <label htmlFor={`${p}-cidade`} className={LABEL}>
@@ -205,7 +210,7 @@ export default async function VerPage({
   // novos primeiro, depois maior deságio
   const lista = [...(bruta ?? [])].sort((x, y) => Number(ehNovo(y.visto_em)) - Number(ehNovo(x.visto_em)));
   const qtdNovos = lista.filter((a) => ehNovo(a.visto_em)).length;
-  const nome = new Map((bairros ?? []).map((b) => [b.id, b.nome]));
+  const nome = new Map((bairros ?? []).map((b) => [b.id, nomeBairro(b)]));
   const ativos = (bairros ?? []).filter((b) => b.ativo);
 
   const coletorMin = minutosDesde(cfg?.coletor_visto_em);
@@ -276,7 +281,7 @@ export default async function VerPage({
             ) : (
               <form action={pedirBusca.bind(null, token)} className="space-y-2">
                 <div className="flex flex-wrap items-start gap-2">
-                  <SelecaoBairros bairros={ativos.map((b) => ({ id: b.id, nome: b.nome, zona: b.zona, cidade: b.cidade }))} />
+                  <SelecaoBairros bairros={ativos.map((b) => ({ id: b.id, nome: nomeBairro(b), zona: b.zona, cidade: b.cidade }))} />
                   <FormSubmitButton pendingLabel="Enviando…">{emAndamento ? "Buscando…" : "🔎 Buscar"}</FormSubmitButton>
                 </div>
                 <Link href={`${base}?aba=criterios`} className="text-xs text-primary hover:underline">
@@ -312,7 +317,7 @@ export default async function VerPage({
                 <option value="">Todos os bairros</option>
                 {(bairros ?? []).map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.nome}
+                    {nomeBairro(b)}
                   </option>
                 ))}
               </select>
@@ -372,7 +377,7 @@ export default async function VerPage({
               <details key={b.id} className="group">
                 <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-surface-muted">
                   <span className={`min-w-32 font-semibold ${b.ativo ? "text-ink" : "text-ink-subtle line-through"}`}>
-                    {b.nome} <span className="text-xs font-normal text-ink-muted">{b.cidade}/{siglaUf(b.estado)}</span>
+                    {nomeBairro(b)} <span className="text-xs font-normal text-ink-muted">{b.cidade}/{siglaUf(b.estado)}</span>
                   </span>
                   <span className="text-sm text-ink">{criterioPreco(b)}</span>
                   <span className="text-xs text-ink-muted">{b.tipos.map((t) => ROTULO_TIPO[t] ?? t).join(", ")}</span>
@@ -399,7 +404,7 @@ export default async function VerPage({
                       Salvar
                     </FormSubmitButton>
                     <Acao acao={alternarBairro.bind(null, token, b.id, !b.ativo)} rotulo={b.ativo ? "Pausar" : "Ativar"} variant="secondary" />
-                    <Acao acao={removerBairro.bind(null, token, b.id)} rotulo="Remover" variant="danger" confirmar={`Remover ${b.nome}?`} />
+                    <Acao acao={removerBairro.bind(null, token, b.id)} rotulo="Remover" variant="danger" confirmar={`Remover ${nomeBairro(b)}?`} />
                   </div>
                 </form>
               </details>

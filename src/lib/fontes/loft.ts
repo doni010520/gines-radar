@@ -115,7 +115,9 @@ async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> 
   if ((pagina + 1) * TAMANHO > MAX_RESULTADOS) return [];
   const uf = siglaUf(b.estado);
   const params = new URLSearchParams();
-  params.append("neighborhood[]", `${b.nome}, ${b.cidade}, ${uf}`);
+  // sem bairro = cidade inteira
+  if (b.nome) params.append("neighborhood[]", `${b.nome}, ${b.cidade}, ${uf}`);
+  else params.append("cities[]", `${b.cidade}, ${uf}`);
   params.append("transactionType[]", "for_sale");
   params.append("orderBy[]", "mostRecent");
   params.set("hitsPerPage", String(TAMANHO));
@@ -130,7 +132,7 @@ async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> 
   return (json.listings ?? [])
     .filter(
       (l) =>
-        slug(l.address?.neighborhood ?? "") === alvoBairro &&
+        (!alvoBairro || slug(l.address?.neighborhood ?? "") === alvoBairro) &&
         slug(l.address?.city ?? "") === alvoCidade &&
         (l.transactionType ?? "FOR_SALE").startsWith("FOR_SALE")
     )

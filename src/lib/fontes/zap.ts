@@ -95,8 +95,9 @@ async function buscarPagina(b: BairroBusca, pagina: number, variante?: Variante)
     listingType: "USED",
     addressCity: b.cidade,
     addressState: b.estado,
-    addressNeighborhood: b.nome,
-    ...(b.zona ? { addressZone: b.zona } : {}),
+    // sem bairro = cidade inteira
+    ...(b.nome ? { addressNeighborhood: b.nome } : {}),
+    ...(b.nome && b.zona ? { addressZone: b.zona } : {}),
     size: String(TAMANHO),
     from: String(pagina * TAMANHO),
     categoryPage: "RESULT",

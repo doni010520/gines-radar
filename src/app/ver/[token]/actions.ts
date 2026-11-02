@@ -44,8 +44,10 @@ function valorEmReais(f: FormData, k: string): number | null {
 export async function salvarBairro(token: string, formData: FormData) {
   const db = validar(token);
   const id = texto(formData, "id");
-  const nome = nomeProprio(texto(formData, "nome"));
-  if (!nome) throw new Error("Informe o nome do bairro");
+  // "sem bairro definido" = cidade inteira, gravado com nome vazio
+  const cidadeInteira = formData.get("cidade_inteira") === "on";
+  const nome = cidadeInteira ? "" : nomeProprio(texto(formData, "nome"));
+  if (!nome && !cidadeInteira) throw new Error("Informe o bairro ou marque “sem bairro definido”");
   const cidade = nomeProprio(texto(formData, "cidade"));
   const estado = texto(formData, "estado");
   if (!cidade) throw new Error("Informe a cidade");

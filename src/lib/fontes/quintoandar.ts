@@ -97,7 +97,8 @@ function normalizar(h: HitBruto): Anuncio {
 }
 
 async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> {
-  const local = `${slug(b.nome)}-${slug(b.cidade)}-${slug(siglaUf(b.estado))}-brasil`;
+  // sem bairro = cidade inteira
+  const local = `${b.nome ? `${slug(b.nome)}-` : ""}${slug(b.cidade)}-${slug(siglaUf(b.estado))}-brasil`;
   const corpo = {
     context: { isSSR: false },
     filters: { businessContext: "SALE", isExactSearch: true },
@@ -114,13 +115,13 @@ async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> 
 
   // bairro desconhecido → o portal busca na cidade inteira; não serve pra média do bairro
   const contexto = json.locationInfo?.locations?.[0]?.locationContext;
-  if (contexto && contexto !== "NEIGHBORHOOD") return [];
+  if (contexto && contexto !== (b.nome ? "NEIGHBORHOOD" : "CITY")) return [];
 
   const alvoBairro = slug(b.nome);
   const alvoCidade = slug(b.cidade);
   return (json.hits?.hits ?? [])
     .filter((h) => h._source.forSale !== false)
-    .filter((h) => slug(h._source.neighbourhood ?? h._source.regionName ?? "") === alvoBairro)
+    .filter((h) => !alvoBairro || slug(h._source.neighbourhood ?? h._source.regionName ?? "") === alvoBairro)
     .filter((h) => !h._source.city || slug(h._source.city) === alvoCidade)
     .map(normalizar);
 }

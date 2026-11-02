@@ -37,6 +37,8 @@ type Config = {
   ufs: string[];
   /** caminho da página de venda do bairro, com o slug do portal */
   caminhoBairro(bairro: string, cidade: string, uf: string): string;
+  /** caminho da página de venda da cidade inteira (bairro sem nome) */
+  caminhoCidade(cidade: string, uf: string): string;
 };
 
 type Local = { id: string; tipo: string; nome: string };
@@ -106,7 +108,7 @@ function doBairro(loc: LocalizacaoBruta | null | undefined, b: BairroBusca, uf: 
   let estado = false;
   for (let n = loc; n; n = n.parent) {
     const s = slug(n.name ?? "");
-    if ((n.depth ?? 0) >= 3 && s === slug(b.nome)) bairro = true;
+    if (!b.nome || ((n.depth ?? 0) >= 3 && s === slug(b.nome))) bairro = true;
     if (n.label === "CIUDAD" && s === slug(b.cidade)) cidade = true;
     if (n.label === "PROVINCIA" && n.acronym?.toUpperCase() === uf) estado = true;
   }
@@ -118,8 +120,12 @@ function criarFonte(cfg: Config): Fonte {
   const locais = new Map<string, Promise<Local | null>>();
 
   /** id interno do bairro, lido da página HTML (null = portal não conhece o bairro). */
+  const urlLocal = (b: BairroBusca, uf: string) =>
+    base +
+    (b.nome ? cfg.caminhoBairro(slug(b.nome), slug(b.cidade), uf.toLowerCase()) : cfg.caminhoCidade(slug(b.cidade), uf.toLowerCase()));
+
   async function resolverLocal(b: BairroBusca, uf: string): Promise<Local | null> {
-    const url = base + cfg.caminhoBairro(slug(b.nome), slug(b.cidade), uf.toLowerCase());
+    const url = urlLocal(b, uf);
     const res = await baixar(url, HEADERS_NAVEGADOR);
     if (res.status === 404) return null;
     if (res.status !== 200) throw new Error(`${cfg.nome} página do bairro ${res.status}: ${res.corpo.slice(0, 200)}`);
@@ -129,7 +135,7 @@ function criarFonte(cfg: Config): Fonte {
     if (!estado) throw new Error(`${cfg.nome} página do bairro sem __PRELOADED_STATE__: ${res.corpo.slice(0, 200)}`);
     const op = estado.listStore?.appliedFilters?.find((f) => f.type === "location")?.options?.[0];
     // bairro desconhecido cai na cidade/estado: o nome do filtro aplicado não bate
-    if (!op?.min || !op.type || slug(op.label ?? "") !== slug(b.nome)) return null;
+    if (!op?.min || !op.type || slug(op.label ?? "") !== slug(b.nome || b.cidade)) return null;
     return { id: op.min, tipo: op.type, nome: op.label ?? b.nome };
   }
 
@@ -168,7 +174,7 @@ function criarFonte(cfg: Config): Fonte {
     if (cfg.ufs.length && !cfg.ufs.includes(uf)) return [];
     const loc = await local(b, uf);
     if (!loc) return [];
-    const referer = base + cfg.caminhoBairro(slug(b.nome), slug(b.cidade), uf.toLowerCase());
+    const referer = urlLocal(b, uf);
     const res = await baixar(
       `${base}/rplis-api/postings`,
       {
@@ -221,6 +227,7 @@ export const wimoveis: Fonte = criarFonte({
   host: "www.wimoveis.com.br",
   ufs: ["DF"],
   caminhoBairro: (bairro, cidade, uf) => `/venda/imoveis/${uf}/${cidade}/${bairro}`,
+  caminhoCidade: (cidade, uf) => `/venda/imoveis/${uf}/${cidade}`,
 });
 
 /** Casa Mineira: só MG. /venda/imovel/savassi_belo-horizonte_mg */
@@ -230,6 +237,7 @@ export const casamineira: Fonte = criarFonte({
   host: "www.casamineira.com.br",
   ufs: ["MG"],
   caminhoBairro: (bairro, cidade, uf) => `/venda/imovel/${bairro}_${cidade}_${uf}`,
+  caminhoCidade: (cidade, uf) => `/venda/imovel/${cidade}_${uf}`,
 });
 
 /**
@@ -242,4 +250,5 @@ export const imovelweb: Fonte = criarFonte({
   host: "www.imovelweb.com.br",
   ufs: [],
   caminhoBairro: (bairro, cidade) => `/imoveis-venda-${bairro}-${cidade}.html`,
+  caminhoCidade: (cidade, uf) => `/imoveis-venda-${cidade}-${uf}.html`, // sem a UF o portal não aplica a cidade
 });

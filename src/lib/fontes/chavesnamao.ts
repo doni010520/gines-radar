@@ -130,7 +130,8 @@ function normalizar(c: CardBruto): Anuncio {
 
 function urlBusca(b: BairroBusca, pagina: number): string {
   const uf = siglaUf(b.estado).toLowerCase();
-  return `${BASE}/imoveis-a-venda/${uf}-${slug(b.cidade)}/${slug(b.nome)}/?filtro=or:6&pg=${pagina + 1}`;
+  const bairro = b.nome ? `${slug(b.nome)}/` : ""; // sem bairro = cidade inteira
+  return `${BASE}/imoveis-a-venda/${uf}-${slug(b.cidade)}/${bairro}?filtro=or:6&pg=${pagina + 1}`;
 }
 
 async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> {
@@ -149,7 +150,7 @@ async function buscarPagina(b: BairroBusca, pagina: number): Promise<Anuncio[]> 
     vistos.add(String(c.id));
     if (c.transaction && c.transaction !== "SELL") continue;
     // nunca devolver anúncio de outro bairro (fallback pra cidade, "imóveis próximos"...)
-    if (slug(c.location?.neighborhood?.name ?? "") !== alvo) continue;
+    if (alvo && slug(c.location?.neighborhood?.name ?? "") !== alvo) continue;
     anuncios.push(normalizar(c));
   }
   return anuncios;

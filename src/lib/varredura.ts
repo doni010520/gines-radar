@@ -7,6 +7,7 @@ import { avaliar, calcularReferencias, motivoExclusao, palavrasEncontradas, refe
 import { enviarWhatsApp } from "./whatsapp";
 import { logEvent } from "./log";
 import { aplicarFaixa } from "./faixa";
+import { nomeBairro } from "./bairro";
 
 type Db = ReturnType<typeof createServiceClient>;
 type Bairro = Database["public"]["Tables"]["radar_bairros"]["Row"];
@@ -86,7 +87,7 @@ async function mesmaOportunidade(db: Db, bairroId: string, a: Anuncio): Promise<
 
 function textoAlerta(b: Bairro, f: Fonte, a: Anuncio, m2: number | null, pct: number | null, ref: number | null, palavras: string[]) {
   return [
-    `🏚️ *Oportunidade — ${b.nome}* (${f.nome})`,
+    `🏚️ *Oportunidade — ${nomeBairro(b)}* (${f.nome})`,
     a.titulo,
     a.preco ? `💰 R$ ${fmt(a.preco)}${m2 ? ` · R$ ${fmt(m2)}/m²` : ""}` : "",
     pct !== null && ref ? `📉 ${pct}% abaixo da referência do bairro (R$ ${fmt(ref)}/m²)` : "",
