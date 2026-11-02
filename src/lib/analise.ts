@@ -124,12 +124,23 @@ export function avaliar(params: {
   pctAbaixoMedia: number;
   mediaM2: number | null;
   palavras: string[];
+  /**
+   * Faixa de valor do bairro (Gines, 02/11/26): fora dela não é oportunidade, mesmo barato —
+   * o anúncio continua contando pra média do bairro. Sem mínimo/máximo = sem limite.
+   */
+  preco?: number | null;
+  precoMin?: number | null;
+  precoMax?: number | null;
 }): Avaliacao {
-  const { precoM2, tetoM2, pctAbaixoMedia, mediaM2, palavras } = params;
+  const { precoM2, tetoM2, pctAbaixoMedia, mediaM2, palavras, preco, precoMin, precoMax } = params;
   const motivos: string[] = [];
   let pctAbaixo: number | null = null;
 
   if (precoM2 && mediaM2) pctAbaixo = Math.round((1 - precoM2 / mediaM2) * 100);
+
+  if ((precoMin || precoMax) && (!preco || (precoMin && preco < precoMin) || (precoMax && preco > precoMax))) {
+    return { oportunidade: false, motivo: "fora da faixa de valor", pctAbaixo, referenciaM2: tetoM2 ?? mediaM2 };
+  }
 
   if (precoM2 && tetoM2 && precoM2 <= tetoM2) {
     motivos.push(`R$/m² abaixo do teto do bairro (${Math.round(tetoM2)})`);

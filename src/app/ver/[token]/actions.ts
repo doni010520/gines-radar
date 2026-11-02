@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/service";
+import { aplicarFaixa } from "@/lib/faixa";
 import { ESTADOS, nomeProprio } from "@/lib/estados";
 
 /**
@@ -22,6 +23,22 @@ function numeroOuNulo(f: FormData, k: string): number | null {
   const n = Number(bruto);
   if (!Number.isFinite(n) || n <= 0) throw new Error(`Valor inválido em ${k}`);
   return n;
+}
+
+/**
+ * Valor em reais digitado do jeito que vier: "800000", "800.000", "R$ 1.500.000,00",
+ * "800 mil", "1,5 mi". Vazio = sem limite.
+ */
+function valorEmReais(f: FormData, k: string): number | null {
+  const bruto = texto(f, k).toLowerCase();
+  if (!bruto) return null;
+  const mult = /\bmi(lh[aã]o|lh[oõ]es)?\b|\bmi$/.test(bruto) ? 1e6 : /\bmil\b/.test(bruto) ? 1e3 : 1;
+  let n = bruto.replace(/[^\d,.]/g, "");
+  // "1,5" com milhão/mil → decimal; "1.500.000,00" → separador de milhar
+  n = mult > 1 ? n.replace(/\./g, "").replace(",", ".") : n.replace(/\./g, "").replace(/,\d{0,2}$/, "");
+  const v = Number(n) * mult;
+  if (!Number.isFinite(v) || v <= 0) throw new Error(`Valor inválido: ${texto(f, k)}`);
+  return Math.round(v);
 }
 
 export async function salvarBairro(token: string, formData: FormData) {
@@ -45,11 +62,18 @@ export async function salvarBairro(token: string, formData: FormData) {
     teto_m2: numeroOuNulo(formData, "teto_m2"),
     pct_abaixo_media: pct,
     tipos,
+    preco_min: valorEmReais(formData, "preco_min"),
+    preco_max: valorEmReais(formData, "preco_max"),
   };
+  if (linha.preco_min && linha.preco_max && linha.preco_min > linha.preco_max) {
+    throw new Error("O valor mínimo está maior que o máximo");
+  }
   const { error } = id
     ? await db.from("radar_bairros").update(linha).eq("id", id)
     : await db.from("radar_bairros").insert(linha);
   if (error) throw new Error(error.code === "23505" ? "Esse bairro já está cadastrado" : error.message);
+  // faixa nova/apertada: o que ficou fora some da lista já, sem esperar a próxima busca
+  if (id) await aplicarFaixa(db, id, linha.preco_min, linha.preco_max);
   revalidatePath(`/ver/${token}`);
 }
 
@@ -104,9 +128,30 @@ export async function pedirBusca(token: string, formData: FormData) {
   revalidatePath(`/ver/${token}`);
 }
 
-export async function salvarNumero(token: string, formData: FormData) {
+/** Número com DDD sem o 55 ("19988094098") ganha o 55; grupo (@g.us) vai como está. */
+function numeroWhatsApp(bruto: string): string | null {
+  const t = bruto.trim();
+  if (!t) return null;
+  if (t.includes("@")) return t;
+  const d = t.replace(/\D/g, "");
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  return d.length >= 12 ? d : null;
+}
+
+/** Aba Alertas: números que recebem as oportunidades + busca automática diária. */
+export async function salvarAlertas(token: string, formData: FormData) {
   const db = validar(token);
-  const numero = texto(formData, "alerta_numero").replace(/[^\d@.a-z]/gi, "");
-  await db.from("radar_config").update({ alerta_numero: numero || null }).eq("id", true);
+  const linhas = texto(formData, "alerta_numeros").split(/[\n,;]+/);
+  const numeros = [...new Set(linhas.map(numeroWhatsApp).filter((n): n is string => !!n))];
+  const hora = Math.min(23, Math.max(0, Number(texto(formData, "sentinela_hora")) || 9));
+  await db
+    .from("radar_config")
+    .update({
+      alerta_numeros: numeros,
+      alerta_numero: numeros[0] ?? null,
+      sentinela_ativa: formData.get("sentinela_ativa") === "on",
+      sentinela_hora: hora,
+    })
+    .eq("id", true);
   revalidatePath(`/ver/${token}`);
 }

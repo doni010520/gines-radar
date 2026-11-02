@@ -6,6 +6,7 @@ import { fecharNavegadores } from "./fontes/navegador";
 import { avaliar, calcularReferencias, motivoExclusao, palavrasEncontradas, referenciaDe, type Referencias } from "./analise";
 import { enviarWhatsApp } from "./whatsapp";
 import { logEvent } from "./log";
+import { aplicarFaixa } from "./faixa";
 
 type Db = ReturnType<typeof createServiceClient>;
 type Bairro = Database["public"]["Tables"]["radar_bairros"]["Row"];
@@ -26,6 +27,13 @@ function precoM2(a: Anuncio): number | null {
   const m2 = Math.round(a.preco / a.area);
   return m2 >= 500 ? m2 : null;
 }
+
+/** Faixa de valor do bairro pro avaliar() (vazio = sem limite). */
+const faixaDe = (b: Bairro, preco: number | null) => ({
+  preco,
+  precoMin: b.preco_min ? Number(b.preco_min) : null,
+  precoMax: b.preco_max ? Number(b.preco_max) : null,
+});
 
 const fmt = (n: number) => n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 
@@ -114,13 +122,13 @@ function precisaDescricao(a: Anuncio, b: Bairro, ref: Referencias, termos: strin
  * separados); portal sem variantes faz uma passada só. Cada variante aprende a média uma vez —
  * fica registrada em radar_bairros.aprendido_variantes como "<portal>:<variante>".
  */
-async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[], alertaNumero: string | null) {
+async function varrerBairroNaFonte(db: Db, b: Bairro, f: Fonte, termos: string[], alertaNumeros: string[]) {
   const lista: (Variante | undefined)[] = f.variantes ? f.variantes(b.tipos) : [undefined];
   const total = { novos: 0, oportunidades: 0 };
   for (const v of lista) {
     const marca = `${f.portal}:${v?.chave ?? "*"}`;
     const aprendendo = !b.aprendido_variantes.includes(marca);
-    const r = await varrerVariante(db, b, f, v, aprendendo, termos, alertaNumero);
+    const r = await varrerVariante(db, b, f, v, aprendendo, termos, alertaNumeros);
     total.novos += r.novos;
     total.oportunidades += r.oportunidades;
     if (aprendendo) {
@@ -138,7 +146,7 @@ async function varrerVariante(
   variante: Variante | undefined,
   aprendendo: boolean,
   termos: string[],
-  alertaNumero: string | null
+  alertaNumeros: string[]
 ) {
   const busca = { nome: b.nome, zona: b.zona, cidade: b.cidade, estado: b.estado };
   const paginas = aprendendo ? f.paginasAprendizado : f.paginasNovos;
@@ -185,6 +193,7 @@ async function varrerVariante(
         pctAbaixoMedia: Number(b.pct_abaixo_media),
         mediaM2: referenciaDe(refInicial, a.tipo, a.area),
         palavras: [],
+        ...faixaDe(b, a.preco),
       });
       if (!av.oportunidade) continue;
       // leilão / imóvel de banco: critério de exclusão do Gines (na 1ª leva só há título e anunciante)
@@ -240,6 +249,7 @@ async function varrerVariante(
       pctAbaixoMedia: Number(b.pct_abaixo_media),
       mediaM2: referenciaDe(ref, a.tipo, a.area),
       palavras,
+      ...faixaDe(b, a.preco),
     });
     const exclusao = av.oportunidade ? motivoExclusao(`${a.titulo}\n${a.anunciante ?? ""}\n${descricao}`, a.titulo) : null;
     const repetido = av.oportunidade && !exclusao ? await mesmaOportunidade(db, b.id, a) : null;
@@ -261,13 +271,18 @@ async function varrerVariante(
     if (!av.oportunidade) continue;
     oportunidades++;
 
-    if (alertaNumero) {
-      try {
-        await enviarWhatsApp(alertaNumero, textoAlerta(b, f, a, m2, av.pctAbaixo, av.referenciaM2, palavras));
-        await db.from("radar_anuncios").update({ alertado_em: new Date().toISOString() }).eq("id", a.id);
-      } catch (err) {
-        await logEvent("error", "falha ao enviar alerta", { id: a.id, error: String(err) });
+    if (alertaNumeros.length) {
+      const texto = textoAlerta(b, f, a, m2, av.pctAbaixo, av.referenciaM2, palavras);
+      let algum = false;
+      for (const numero of alertaNumeros) {
+        try {
+          await enviarWhatsApp(numero, texto);
+          algum = true;
+        } catch (err) {
+          await logEvent("error", "falha ao enviar alerta", { id: a.id, numero, error: String(err) });
+        }
       }
+      if (algum) await db.from("radar_anuncios").update({ alertado_em: new Date().toISOString() }).eq("id", a.id);
     }
   }
   return { novos: doTipo.length, oportunidades };
@@ -280,6 +295,7 @@ async function varrerVariante(
  * sem abrir portal.
  */
 async function reavaliarAntigos(db: Db, b: Bairro): Promise<number> {
+  await aplicarFaixa(db, b.id, b.preco_min ? Number(b.preco_min) : null, b.preco_max ? Number(b.preco_max) : null);
   const ref = await medias(db, b.id);
   let marcadas = 0;
   for (let de = 0; ; de += 1000) {
@@ -312,6 +328,7 @@ async function reavaliarAntigos(db: Db, b: Bairro): Promise<number> {
         pctAbaixoMedia: Number(b.pct_abaixo_media),
         mediaM2: referenciaDe(ref, anuncio.tipo, anuncio.area),
         palavras: [],
+        ...faixaDe(b, anuncio.preco),
       });
       if (!av.oportunidade) continue;
       const exclusao = motivoExclusao(`${anuncio.titulo}\n${a.anunciante ?? ""}\n${a.descricao ?? ""}`, anuncio.titulo);
@@ -358,7 +375,10 @@ export async function rodarVarredura(
     const termos = (palavras ?? []).map((p) => p.termo);
     const proxyAntes = consumo.proxy.bytes;
     const diretoAntes = consumo.direto.bytes;
-    const alertaNumero = config?.alerta_numero?.trim() || process.env.RADAR_ALERTA_NUMERO?.trim() || null;
+    // vários destinatários (aba Alertas); o campo antigo de número único fica de reserva
+    const alertaNumeros: string[] = config?.alerta_numeros?.length
+      ? config.alerta_numeros
+      : [config?.alerta_numero?.trim() || process.env.RADAR_ALERTA_NUMERO?.trim() || ""].filter(Boolean);
     const total = { bairros: 0, novos: 0, oportunidades: 0 };
     const porPortal: Record<string, number> = {};
     const erros: string[] = [];
@@ -366,7 +386,7 @@ export async function rodarVarredura(
       let algumPortalOk = false;
       for (const f of FONTES) {
         try {
-          const r = await varrerBairroNaFonte(db, b, f, termos, alertaNumero);
+          const r = await varrerBairroNaFonte(db, b, f, termos, alertaNumeros);
           algumPortalOk = true;
           total.novos += r.novos;
           total.oportunidades += r.oportunidades;

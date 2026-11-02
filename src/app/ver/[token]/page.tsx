@@ -18,7 +18,7 @@ import {
   removerBairro,
   removerPalavra,
   salvarBairro,
-  salvarNumero,
+  salvarAlertas,
 } from "./actions";
 
 /**
@@ -55,6 +55,8 @@ type BairroForm = {
   estado: string;
   teto_m2: number | null;
   pct_abaixo_media: number;
+  preco_min: number | null;
+  preco_max: number | null;
   tipos: string[];
 };
 
@@ -63,8 +65,24 @@ function minutosDesde(iso: string | null | undefined) {
   return Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
 }
 
-const criterioPreco = (b: { teto_m2: number | string | null; pct_abaixo_media: number | string }) =>
-  b.teto_m2 ? `R$/m² até ${Number(b.teto_m2).toLocaleString("pt-BR")}` : `${Number(b.pct_abaixo_media)}% abaixo da média`;
+const reais = (v: number | string) => `R$ ${Number(v).toLocaleString("pt-BR")}`;
+const criterioPreco = (b: {
+  teto_m2: number | string | null;
+  pct_abaixo_media: number | string;
+  preco_min?: number | string | null;
+  preco_max?: number | string | null;
+}) => {
+  const corte = b.teto_m2 ? `R$/m² até ${Number(b.teto_m2).toLocaleString("pt-BR")}` : `${Number(b.pct_abaixo_media)}% abaixo da média`;
+  const faixa =
+    b.preco_min && b.preco_max
+      ? `entre ${reais(b.preco_min)} e ${reais(b.preco_max)}`
+      : b.preco_min
+        ? `a partir de ${reais(b.preco_min)}`
+        : b.preco_max
+          ? `até ${reais(b.preco_max)}`
+          : "";
+  return faixa ? `${corte} · ${faixa}` : corte;
+};
 
 function CamposBairro({ b }: { b?: BairroForm }) {
   const p = b?.id ?? "novo";
@@ -116,6 +134,21 @@ function CamposBairro({ b }: { b?: BairroForm }) {
           </label>
           <input id={`${p}-zona`} name="zona" defaultValue={b?.zona ?? ""} placeholder="ex.: Zona Oeste" className={`min-h-11 ${CONTROL}`} />
         </div>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="space-y-1.5">
+          <label htmlFor={`${p}-pmin`} className={LABEL}>
+            Valor mínimo <span className="font-normal text-ink-subtle">(opcional)</span>
+          </label>
+          <input id={`${p}-pmin`} name="preco_min" inputMode="numeric" defaultValue={b?.preco_min ? reais(b.preco_min) : ""} placeholder="ex.: 800 mil" className={`tabular min-h-11 ${CONTROL}`} />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor={`${p}-pmax`} className={LABEL}>
+            Valor máximo <span className="font-normal text-ink-subtle">(opcional)</span>
+          </label>
+          <input id={`${p}-pmax`} name="preco_max" inputMode="numeric" defaultValue={b?.preco_max ? reais(b.preco_max) : ""} placeholder="ex.: 1,5 mi" className={`tabular min-h-11 ${CONTROL}`} />
+        </div>
+        <p className="self-end pb-2 text-xs text-ink-subtle">Só vira oportunidade o que estiver abaixo da média e dentro da faixa.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         {TIPOS.map(([valor, rotulo]) => (
@@ -355,6 +388,8 @@ export default async function VerPage({
                       cidade: b.cidade,
                       estado: b.estado,
                       teto_m2: b.teto_m2 === null ? null : Number(b.teto_m2),
+                      preco_min: b.preco_min === null ? null : Number(b.preco_min),
+                      preco_max: b.preco_max === null ? null : Number(b.preco_max),
                       pct_abaixo_media: Number(b.pct_abaixo_media),
                       tipos: b.tipos,
                     }}
@@ -404,12 +439,37 @@ export default async function VerPage({
 
       {aba === "alertas" && (
         <Card className="p-4">
-          <form action={salvarNumero.bind(null, token)} className="flex flex-wrap items-end gap-2">
-            <div className="min-w-48 flex-1 space-y-1.5">
-              <label htmlFor="alerta_numero" className={LABEL}>
-                WhatsApp que recebe cada oportunidade nova (vazio = só aparece aqui)
+          <form action={salvarAlertas.bind(null, token)} className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="alerta_numeros" className={LABEL}>
+                WhatsApp que recebe cada oportunidade nova <span className="font-normal text-ink-subtle">(um por linha; vazio = só aparece aqui)</span>
               </label>
-              <input id="alerta_numero" name="alerta_numero" defaultValue={cfg?.alerta_numero ?? ""} placeholder="5511999999999" className={`tabular min-h-11 ${CONTROL}`} />
+              <textarea
+                id="alerta_numeros"
+                name="alerta_numeros"
+                rows={3}
+                defaultValue={(cfg?.alerta_numeros ?? []).join("\n")}
+                placeholder={"11999999999\n19988887777"}
+                className={`tabular py-2.5 ${CONTROL}`}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-muted/40 p-3">
+              <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-ink">
+                <input type="checkbox" name="sentinela_ativa" defaultChecked={cfg?.sentinela_ativa ?? false} className="h-4 w-4 accent-[var(--color-primary)]" />
+                Busca automática todo dia
+              </label>
+              <span className="text-sm text-ink-muted">às</span>
+              <select name="sentinela_hora" defaultValue={String(cfg?.sentinela_hora ?? 9)} aria-label="Horário da busca automática" className={`min-h-10 w-auto ${CONTROL}`}>
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={h}>
+                    {String(h).padStart(2, "0")}h
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-ink-subtle">
+                em todos os bairros ativos; avisa só as oportunidades novas
+                {cfg?.sentinela_ultima ? ` · última: ${new Date(`${cfg.sentinela_ultima}T12:00:00`).toLocaleDateString("pt-BR")}` : ""}
+              </span>
             </div>
             <FormSubmitButton pendingLabel="..." size="sm">
               Salvar

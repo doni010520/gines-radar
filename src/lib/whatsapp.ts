@@ -4,7 +4,9 @@ export async function enviarWhatsApp(numero: string, texto: string) {
   const token = process.env.UAZAPI_TOKEN;
   if (!base || !token) throw new Error("UAZAPI_BASE_URL/UAZAPI_TOKEN não configurados");
   // grupo (@g.us) vai como está; telefone só com dígitos
-  const destino = numero.includes("@") ? numero.trim() : numero.replace(/\D/g, "");
+  let destino = numero.includes("@") ? numero.trim() : numero.replace(/\D/g, "");
+  // DDD + número sem o 55 ("19988094098") não é entregue pela UAZAPI
+  if (/^\d{10,11}$/.test(destino)) destino = `55${destino}`;
   const res = await fetch(`${base.replace(/\/$/, "")}/send/text`, {
     method: "POST",
     headers: { token, "Content-Type": "application/json" },

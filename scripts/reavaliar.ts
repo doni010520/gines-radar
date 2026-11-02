@@ -56,6 +56,9 @@ async function main() {
         pctAbaixoMedia: Number(b.pct_abaixo_media),
         mediaM2: referenciaDe(ref, a.tipo, area),
         palavras: palavrasAchadas,
+        preco: a.preco === null ? null : Number(a.preco),
+        precoMin: b.preco_min ? Number(b.preco_min) : null,
+        precoMax: b.preco_max ? Number(b.preco_max) : null,
       });
       // tipo não residencial (comercial, prédio, rural) nunca é oportunidade
       const residencial = !!a.tipo && b.tipos.includes(a.tipo);

@@ -625,6 +625,8 @@ export type Database = {
       }
       radar_bairros: {
         Row: {
+          preco_min: number | null
+          preco_max: number | null
           aprendido_em: string | null
           aprendido_variantes: string[]
           ativo: boolean
@@ -640,6 +642,8 @@ export type Database = {
           zona: string
         }
         Insert: {
+          preco_min?: number | null
+          preco_max?: number | null
           aprendido_em?: string | null
           aprendido_variantes?: string[]
           ativo?: boolean
@@ -655,6 +659,8 @@ export type Database = {
           zona?: string
         }
         Update: {
+          preco_min?: number | null
+          preco_max?: number | null
           aprendido_em?: string | null
           aprendido_variantes?: string[]
           ativo?: boolean
@@ -673,6 +679,10 @@ export type Database = {
       }
       radar_config: {
         Row: {
+          alerta_numeros: string[]
+          sentinela_ativa: boolean
+          sentinela_hora: number
+          sentinela_ultima: string | null
           alerta_numero: string | null
           ativo: boolean
           busca_bairro_id: string | null
@@ -688,6 +698,10 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          alerta_numeros?: string[]
+          sentinela_ativa?: boolean
+          sentinela_hora?: number
+          sentinela_ultima?: string | null
           alerta_numero?: string | null
           ativo?: boolean
           busca_bairro_id?: string | null
@@ -703,6 +717,10 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          alerta_numeros?: string[]
+          sentinela_ativa?: boolean
+          sentinela_hora?: number
+          sentinela_ultima?: string | null
           alerta_numero?: string | null
           ativo?: boolean
           busca_bairro_id?: string | null
