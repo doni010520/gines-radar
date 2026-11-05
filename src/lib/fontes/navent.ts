@@ -101,6 +101,12 @@ function tipoDe(p: PostingBruto): TipoImovel | null {
   return null; // comercial, rural, galpão...
 }
 
+/** Nome do bairro na árvore de localização do anúncio (nível 3 em diante; acima é cidade/UF). */
+function bairroDe(loc: LocalizacaoBruta | null | undefined): string | null {
+  for (let n = loc; n; n = n.parent) if ((n.depth ?? 0) >= 3 && n.name) return n.name;
+  return null;
+}
+
 /** O anúncio é mesmo do bairro/cidade/UF pedidos? (a lista traz destaque de bairro vizinho) */
 function doBairro(loc: LocalizacaoBruta | null | undefined, b: BairroBusca, uf: string): boolean {
   let bairro = false;
@@ -166,6 +172,7 @@ function criarFonte(cfg: Config): Fonte {
       area: tipo === "RESIDENTIAL_ALLOTMENT_LAND" ? total ?? util : util ?? total,
       anunciante: p.publisher?.name?.trim() || null,
       criadoNoPortal: null,
+      bairro: bairroDe(p.postingLocation?.location),
     };
   }
 

@@ -105,6 +105,7 @@ function normalizar(l: ListingBruto): Anuncio {
     area,
     anunciante: l.agencyName ?? null,
     criadoNoPortal: l.createdAt ?? null,
+    bairro: l.address?.neighborhood || null,
   };
 }
 

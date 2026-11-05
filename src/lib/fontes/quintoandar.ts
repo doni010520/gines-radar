@@ -93,6 +93,7 @@ function normalizar(h: HitBruto): Anuncio {
     area: numero(s.area),
     anunciante: "QuintoAndar",
     criadoNoPortal: null,
+    bairro: bairro || null,
   };
 }
 

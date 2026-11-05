@@ -240,6 +240,7 @@ function normalizar(a: AnuncioBruto): Anuncio {
     // particular: o nome é de pessoa física — não guardamos
     anunciante: a.professionalAd ? a.olxPay?.transactionalSellerName?.trim() || null : "Particular",
     criadoNoPortal: a.date ? new Date(a.date * 1000).toISOString() : null,
+    bairro: a.locationDetails?.neighbourhood || null,
   };
 }
 

@@ -15,7 +15,7 @@ for (const linha of readFileSync(join(process.cwd(), ".env.coletor"), "utf8").sp
 
 async function main() {
   const { createServiceClient } = await import("../src/lib/supabase/service");
-  const { avaliar, calcularReferencias, motivoExclusao, palavrasEncontradas, referenciaDe } = await import("../src/lib/analise");
+  const { avaliar, calcularReferenciasLocal, motivoExclusao, palavrasEncontradas, referenciaLocal } = await import("../src/lib/analise");
   const { fontePorPortal } = await import("../src/lib/fontes");
   const comDescricoes = process.argv.includes("--descricoes");
   const db = createServiceClient();
@@ -32,10 +32,16 @@ async function main() {
       lista.push(...(data ?? []));
       if (!data || data.length < 1000) break;
     }
-    const ref = calcularReferencias(
-      lista.map((a) => ({ tipo: a.tipo, area: a.area === null ? null : Number(a.area), preco_m2: a.preco_m2 === null ? null : Number(a.preco_m2) }))
+    const ref = calcularReferenciasLocal(
+      lista.map((a) => ({
+        tipo: a.tipo,
+        area: a.area === null ? null : Number(a.area),
+        preco_m2: a.preco_m2 === null ? null : Number(a.preco_m2),
+        bairro_nome: a.bairro_nome,
+      })),
+      !b.nome
     );
-    console.log(`\n${b.nome}: ${lista.length} anúncios · medianas`, Object.fromEntries(ref));
+    console.log(`\n${b.nome || `${b.cidade} (cidade inteira)`}: ${lista.length} anúncios · medianas`, Object.fromEntries(ref.geral));
 
     // oportunidades já aceitas: mesma área e preço até 5% diferente = mesmo imóvel
     const aceitas: { id: string; preco: number; area: number }[] = [];
@@ -54,7 +60,7 @@ async function main() {
         precoM2: a.preco_m2 ? Number(a.preco_m2) : null,
         tetoM2: b.teto_m2 ? Number(b.teto_m2) : null,
         pctAbaixoMedia: Number(b.pct_abaixo_media),
-        mediaM2: referenciaDe(ref, a.tipo, area),
+        mediaM2: referenciaLocal(ref, { tipo: a.tipo, area, bairro: a.bairro_nome }),
         palavras: palavrasAchadas,
         preco: a.preco === null ? null : Number(a.preco),
         precoMin: b.preco_min ? Number(b.preco_min) : null,

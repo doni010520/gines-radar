@@ -85,6 +85,17 @@ const criterioPreco = (b: {
   return faixa ? `${corte} · ${faixa}` : corte;
 };
 
+/** Bairro que não trouxe nenhum anúncio: o nome não bate com o dos portais. */
+function AvisoNome({ b }: { b: { nome: string; cidade: string; sugestoes: string[] | null } }) {
+  const s = b.sugestoes ?? [];
+  return (
+    <>
+      ⚠ Nenhum anúncio de <strong>{b.nome}</strong> ({b.cidade}) — o nome não bate com o dos portais.{" "}
+      {s.length ? `Nos portais aparece como: ${s.join(", ")}. Edite o bairro em Critérios.` : "Confira como os portais escrevem esse bairro."}
+    </>
+  );
+}
+
 function CamposBairro({ b }: { b?: BairroForm }) {
   const p = b?.id ?? "novo";
   return (
@@ -229,6 +240,8 @@ export default async function VerPage({
     .map(([nomePortal, n]) => `${nomePortal} ${n}`)
     .join(" · ");
   const falhas = resultado?.erros?.length ?? 0;
+  // bairro cujo nome nenhum portal reconheceu (0 anúncios): mostra os nomes parecidos da cidade
+  const naoAchados = (bairros ?? []).filter((b) => b.ativo && b.sugestoes);
   const textoStatus =
     status === "aguardando"
       ? coletorOnline
@@ -290,6 +303,11 @@ export default async function VerPage({
               </form>
             )}
             {textoStatus && <p className={`text-sm ${status === "erro" ? "text-danger-ink" : "text-ink-muted"}`}>{textoStatus}</p>}
+            {naoAchados.map((b) => (
+              <p key={b.id} className="text-sm text-danger-ink">
+                <AvisoNome b={b} />
+              </p>
+            ))}
           </Card>
 
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -381,6 +399,11 @@ export default async function VerPage({
                   </span>
                   <span className="text-sm text-ink">{criterioPreco(b)}</span>
                   <span className="text-xs text-ink-muted">{b.tipos.map((t) => ROTULO_TIPO[t] ?? t).join(", ")}</span>
+                  {b.sugestoes && (
+                    <span className="basis-full text-xs text-danger-ink">
+                      <AvisoNome b={b} />
+                    </span>
+                  )}
                   <span className="ml-auto text-xs text-primary group-open:hidden">editar</span>
                   <span className="ml-auto hidden text-xs text-ink-muted group-open:inline">fechar</span>
                 </summary>

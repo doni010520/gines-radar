@@ -3,11 +3,12 @@ import type { Database } from "@/lib/supabase/database.types";
 import { FONTES, type Anuncio, type Fonte, type Variante } from "./fontes";
 import { consumo } from "./fontes/http";
 import { fecharNavegadores } from "./fontes/navegador";
-import { avaliar, calcularReferencias, motivoExclusao, palavrasEncontradas, referenciaDe, type Referencias } from "./analise";
+import { avaliar, calcularReferenciasLocal, motivoExclusao, palavrasEncontradas, referenciaLocal, type ReferenciasLocal } from "./analise";
 import { enviarWhatsApp } from "./whatsapp";
 import { logEvent } from "./log";
 import { aplicarFaixa } from "./faixa";
 import { nomeBairro } from "./bairro";
+import { sugerirBairros } from "./sugestoes";
 
 type Db = ReturnType<typeof createServiceClient>;
 type Bairro = Database["public"]["Tables"]["radar_bairros"]["Row"];
@@ -43,25 +44,32 @@ const fmt = (n: number) => n.toLocaleString("pt-BR", { maximumFractionDigits: 0 
  * nos últimos 180 dias em todos os portais. Sem amostra suficiente não há referência (só
  * palavras-chave valem) — completar com outro grupo distorceria a comparação.
  */
-async function medias(db: Db, bairroId: string): Promise<Referencias> {
+async function medias(db: Db, b: Bairro): Promise<ReferenciasLocal> {
+  const bairroId = b.id;
   const desde = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString();
   // o banco devolve no máximo 1000 linhas por consulta: pagina (Pinheiros já passa de 1700)
-  const linhas: { tipo: string | null; area: number | null; preco_m2: number | null }[] = [];
+  const linhas: { tipo: string | null; area: number | null; preco_m2: number | null; bairro_nome: string | null }[] = [];
   for (let de = 0; ; de += 1000) {
     const { data } = await db
       .from("radar_anuncios")
-      .select("tipo,area,preco_m2")
+      .select("tipo,area,preco_m2,bairro_nome")
       .eq("bairro_id", bairroId)
       .gte("visto_em", desde)
       .not("preco_m2", "is", null)
       .order("id")
       .range(de, de + 999);
     for (const r of data ?? []) {
-      linhas.push({ tipo: r.tipo, area: r.area === null ? null : Number(r.area), preco_m2: r.preco_m2 === null ? null : Number(r.preco_m2) });
+      linhas.push({
+        tipo: r.tipo,
+        area: r.area === null ? null : Number(r.area),
+        preco_m2: r.preco_m2 === null ? null : Number(r.preco_m2),
+        bairro_nome: r.bairro_nome,
+      });
     }
     if (!data || data.length < 1000) break;
   }
-  return calcularReferencias(linhas);
+  // cadastro sem bairro = cidade inteira: cada anúncio contra a média do bairro dele
+  return calcularReferenciasLocal(linhas, !b.nome);
 }
 
 /**
@@ -108,12 +116,12 @@ const MARGEM_DESCRICAO = 20;
  * decide) ou se o título já cita palavra-chave. Anúncio caro não vira oportunidade nem com
  * "reforma" no texto — o Gines quer desconto real.
  */
-function precisaDescricao(a: Anuncio, b: Bairro, ref: Referencias, termos: string[]): boolean {
+function precisaDescricao(a: Anuncio, b: Bairro, ref: ReferenciasLocal, termos: string[]): boolean {
   if (palavrasEncontradas(a.titulo, termos).length) return true;
   const m2 = precoM2(a);
   if (!m2) return false;
   if (b.teto_m2) return m2 <= Number(b.teto_m2) * 1.25;
-  const media = referenciaDe(ref, a.tipo, a.area);
+  const media = referenciaLocal(ref, a);
   if (!media) return true;
   return (1 - m2 / media) * 100 >= Number(b.pct_abaixo_media) - MARGEM_DESCRICAO;
 }
@@ -178,21 +186,21 @@ async function varrerVariante(
         doTipo.map((a) => ({
           id: a.id, portal: f.portal, bairro_id: b.id, tipo: a.tipo, titulo: a.titulo, url: a.url,
           preco: a.preco, area: a.area, preco_m2: precoM2(a), anunciante: a.anunciante,
-          criado_no_portal: a.criadoNoPortal,
+          criado_no_portal: a.criadoNoPortal, bairro_nome: a.bairro ?? null,
         })),
         { onConflict: "id", ignoreDuplicates: true }
       );
     }
     // com a média formada, já marca as oportunidades por preço dessa 1ª leva (sem abrir cada
     // anúncio — as palavras-chave valem a partir da 2ª busca, que lê a descrição dos novos)
-    const refInicial = await medias(db, b.id);
+    const refInicial = await medias(db, b);
     let oportunidadesIniciais = 0;
     for (const a of doTipo) {
       const av = avaliar({
         precoM2: precoM2(a),
         tetoM2: b.teto_m2 ? Number(b.teto_m2) : null,
         pctAbaixoMedia: Number(b.pct_abaixo_media),
-        mediaM2: referenciaDe(refInicial, a.tipo, a.area),
+        mediaM2: referenciaLocal(refInicial, a),
         palavras: [],
         ...faixaDe(b, a.preco),
       });
@@ -218,7 +226,7 @@ async function varrerVariante(
   }
 
   // 2. analisa cada novo: R$/m² contra a referência + palavras na descrição
-  const ref = await medias(db, b.id);
+  const ref = await medias(db, b);
   // descrições em paralelo (o proxy rotativo dá um IP por requisição): 126 anúncios novos
   // levavam ~10 min um a um (15/10/26)
   const descricoes = new Map<string, string>();
@@ -248,7 +256,7 @@ async function varrerVariante(
       precoM2: m2,
       tetoM2: b.teto_m2 ? Number(b.teto_m2) : null,
       pctAbaixoMedia: Number(b.pct_abaixo_media),
-      mediaM2: referenciaDe(ref, a.tipo, a.area),
+      mediaM2: referenciaLocal(ref, a),
       palavras,
       ...faixaDe(b, a.preco),
     });
@@ -265,7 +273,7 @@ async function varrerVariante(
     const { error } = await db.from("radar_anuncios").insert({
       id: a.id, portal: f.portal, bairro_id: b.id, tipo: a.tipo, titulo: a.titulo, url: a.url,
       preco: a.preco, area: a.area, preco_m2: m2, descricao, palavras, anunciante: a.anunciante,
-      criado_no_portal: a.criadoNoPortal, oportunidade: av.oportunidade, motivo: av.motivo || null,
+      criado_no_portal: a.criadoNoPortal, bairro_nome: a.bairro ?? null, oportunidade: av.oportunidade, motivo: av.motivo || null,
       pct_abaixo: av.pctAbaixo,
     });
     if (error) continue; // corrida com outra varredura: já foi registrado
@@ -295,14 +303,30 @@ async function varrerVariante(
  * Ao fim de cada busca, confere de novo pelo preço quem ainda não é oportunidade. Só banco,
  * sem abrir portal.
  */
+/**
+ * Bairro com nome que nenhum portal reconhece não traz anúncio nunca. Nesse caso guarda nomes
+ * parecidos achados na cidade, que a tela mostra no lugar do "0 anúncios" (null = bairro ok).
+ */
+async function sugestoesSeVazio(db: Db, b: Bairro): Promise<string[] | null> {
+  if (!b.nome) return null;
+  const { count } = await db.from("radar_anuncios").select("id", { count: "exact", head: true }).eq("bairro_id", b.id);
+  if (count) return null;
+  try {
+    return await sugerirBairros(b);
+  } catch (err) {
+    await logEvent("warn", "não consegui sugerir nomes de bairro", { bairro: b.nome, error: String(err) });
+    return [];
+  }
+}
+
 async function reavaliarAntigos(db: Db, b: Bairro): Promise<number> {
   await aplicarFaixa(db, b.id, b.preco_min ? Number(b.preco_min) : null, b.preco_max ? Number(b.preco_max) : null);
-  const ref = await medias(db, b.id);
+  const ref = await medias(db, b);
   let marcadas = 0;
   for (let de = 0; ; de += 1000) {
     const { data } = await db
       .from("radar_anuncios")
-      .select("id,tipo,titulo,anunciante,descricao,preco,area,preco_m2,motivo")
+      .select("id,tipo,titulo,anunciante,descricao,preco,area,preco_m2,motivo,bairro_nome")
       .eq("bairro_id", b.id)
       .eq("oportunidade", false)
       .eq("descartado", false)
@@ -322,12 +346,13 @@ async function reavaliarAntigos(db: Db, b: Bairro): Promise<number> {
         area: a.area === null ? null : Number(a.area),
         anunciante: a.anunciante,
         criadoNoPortal: null,
+        bairro: a.bairro_nome,
       };
       const av = avaliar({
         precoM2: Number(a.preco_m2),
         tetoM2: b.teto_m2 ? Number(b.teto_m2) : null,
         pctAbaixoMedia: Number(b.pct_abaixo_media),
-        mediaM2: referenciaDe(ref, anuncio.tipo, anuncio.area),
+        mediaM2: referenciaLocal(ref, anuncio),
         palavras: [],
         ...faixaDe(b, anuncio.preco),
       });
@@ -403,7 +428,7 @@ export async function rodarVarredura(
         const agora = new Date().toISOString();
         await db
           .from("radar_bairros")
-          .update({ ultima_varredura: agora, ...(b.aprendido_em ? {} : { aprendido_em: agora }) })
+          .update({ ultima_varredura: agora, ...(b.aprendido_em ? {} : { aprendido_em: agora }), sugestoes: await sugestoesSeVazio(db, b) })
           .eq("id", b.id);
       }
     }

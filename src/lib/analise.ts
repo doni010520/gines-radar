@@ -103,6 +103,36 @@ export function calcularReferencias(linhas: { tipo: string | null; area: number 
   return ref;
 }
 
+/**
+ * Referências de um cadastro. No modo "cidade inteira" (Gines, 04/11/26) cada anúncio é comparado
+ * com o bairro dele, como o portal escreve; bairro com pouca amostra usa a da cidade.
+ */
+export type ReferenciasLocal = { geral: Referencias; porBairro: Map<string, Referencias> };
+
+const chaveBairro = (nome: string) => normalizar(nome).trim();
+
+export function calcularReferenciasLocal(
+  linhas: { tipo: string | null; area: number | null; preco_m2: number | null; bairro_nome?: string | null }[],
+  separarPorBairro: boolean
+): ReferenciasLocal {
+  const porBairro = new Map<string, Referencias>();
+  if (separarPorBairro) {
+    const grupos = new Map<string, typeof linhas>();
+    for (const l of linhas) {
+      if (!l.bairro_nome) continue;
+      const k = chaveBairro(l.bairro_nome);
+      grupos.set(k, [...(grupos.get(k) ?? []), l]);
+    }
+    for (const [k, g] of grupos) porBairro.set(k, calcularReferencias(g));
+  }
+  return { geral: calcularReferencias(linhas), porBairro };
+}
+
+export function referenciaLocal(r: ReferenciasLocal, a: { tipo: string | null; area: number | null; bairro?: string | null }): number | null {
+  const doBairro = a.bairro ? r.porBairro.get(chaveBairro(a.bairro)) : undefined;
+  return (doBairro && referenciaDe(doBairro, a.tipo, a.area)) || referenciaDe(r.geral, a.tipo, a.area);
+}
+
 /** Referência de um anúncio: mediana do mesmo tipo e faixa de tamanho; sem amostra, a do tipo. */
 export function referenciaDe(ref: Referencias, tipo: string | null, area: number | null): number | null {
   if (!tipo) return null;

@@ -51,6 +51,7 @@ type ListingBruto = {
   listing: {
     id: string;
     createdAt?: string;
+    address?: { neighborhood?: string };
     unitTypes?: string[];
     unitSubTypes?: string[];
     usableAreas?: number[];
@@ -85,6 +86,7 @@ function normalizar(item: ListingBruto): Anuncio {
     area,
     anunciante: item.account?.name ?? null,
     criadoNoPortal: l.createdAt ?? null,
+    bairro: l.address?.neighborhood || null,
   };
 }
 

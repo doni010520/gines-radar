@@ -121,6 +121,7 @@ function normalizar(i: ImovelBruto): Anuncio {
     area,
     anunciante: i.Imobiliaria ?? null,
     criadoNoPortal: null,
+    bairro: i.Bairro || null,
   };
 }
 

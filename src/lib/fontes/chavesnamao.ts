@@ -125,6 +125,7 @@ function normalizar(c: CardBruto): Anuncio {
     area,
     anunciante: c.publisher?.name?.trim() || null,
     criadoNoPortal: criado && !Number.isNaN(criado.getTime()) ? criado.toISOString() : null,
+    bairro: c.location?.neighborhood?.name || null,
   };
 }
 

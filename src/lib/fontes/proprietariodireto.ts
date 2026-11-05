@@ -89,6 +89,7 @@ function normalizar(p: ImovelBruto): Anuncio {
     area: numero(p.area), // terreno também vem só em "area"
     anunciante: anunciante?.trim() || "Proprietário",
     criadoNoPortal: dataIso(p.created_at),
+    bairro: p.neighborhood?.name || p.neighborhood?.slug || null,
   };
 }
 

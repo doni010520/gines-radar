@@ -70,8 +70,14 @@ export async function salvarBairro(token: string, formData: FormData) {
   if (linha.preco_min && linha.preco_max && linha.preco_min > linha.preco_max) {
     throw new Error("O valor mínimo está maior que o máximo");
   }
+  // trocou o nome ou a cidade: é outro lugar nos portais — some o aviso de nome e reaprende a média
+  const anterior = id ? (await db.from("radar_bairros").select("nome,cidade").eq("id", id).maybeSingle()).data : null;
+  const outroLugar = anterior && (anterior.nome !== linha.nome || anterior.cidade !== linha.cidade);
   const { error } = id
-    ? await db.from("radar_bairros").update(linha).eq("id", id)
+    ? await db
+        .from("radar_bairros")
+        .update({ ...linha, ...(outroLugar ? { sugestoes: null, aprendido_em: null } : {}) })
+        .eq("id", id)
     : await db.from("radar_bairros").insert(linha);
   if (error) throw new Error(error.code === "23505" ? "Esse bairro já está cadastrado" : error.message);
   // faixa nova/apertada: o que ficou fora some da lista já, sem esperar a próxima busca

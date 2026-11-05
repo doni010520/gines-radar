@@ -27,6 +27,8 @@ export type Anuncio = {
   area: number | null; // m² útil/privativo; terreno: área do terreno
   anunciante: string | null;
   criadoNoPortal: string | null; // ISO, se o portal informar
+  /** bairro como o portal escreve; no modo "cidade inteira" separa a média por bairro */
+  bairro?: string | null;
 };
 
 /**

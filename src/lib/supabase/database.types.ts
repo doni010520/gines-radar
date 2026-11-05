@@ -551,6 +551,7 @@ export type Database = {
       }
       radar_anuncios: {
         Row: {
+          bairro_nome: string | null
           alertado_em: string | null
           anunciante: string | null
           area: number | null
@@ -572,6 +573,7 @@ export type Database = {
           visto_em: string
         }
         Insert: {
+          bairro_nome?: string | null
           alertado_em?: string | null
           anunciante?: string | null
           area?: number | null
@@ -593,6 +595,7 @@ export type Database = {
           visto_em?: string
         }
         Update: {
+          bairro_nome?: string | null
           alertado_em?: string | null
           anunciante?: string | null
           area?: number | null
@@ -625,6 +628,7 @@ export type Database = {
       }
       radar_bairros: {
         Row: {
+          sugestoes: string[] | null
           preco_min: number | null
           preco_max: number | null
           aprendido_em: string | null
@@ -642,6 +646,7 @@ export type Database = {
           zona: string
         }
         Insert: {
+          sugestoes?: string[] | null
           preco_min?: number | null
           preco_max?: number | null
           aprendido_em?: string | null
@@ -659,6 +664,7 @@ export type Database = {
           zona?: string
         }
         Update: {
+          sugestoes?: string[] | null
           preco_min?: number | null
           preco_max?: number | null
           aprendido_em?: string | null
